@@ -29,7 +29,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 COPY app/backend/src ./src
 COPY --from=frontend /build/dist/frontend/browser ./static
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev && \
+    /usr/local/bin/python -m pip uninstall --yes pip && \
+    rm -f /bin/uv /bin/uvx
 
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=2s --start-period=5s --retries=3 \
