@@ -59,7 +59,9 @@ release manifest still provide the delivery evidence chain.
 CodeQL always performs both Python and JavaScript/TypeScript analysis and preserves each SARIF result
 as a 14-day workflow artifact. Public repositories also publish those results to GitHub code
 scanning automatically. For a private organization repository with GitHub Advanced Security, set
-`CODE_SCANNING_ENABLED=true` after enabling code scanning to publish the same results as alerts.
+`GHAS_ENABLED=true` after enabling code scanning. That publishes CodeQL results as alerts and uses
+GitHub's dependency-diff and license review. Without GHAS, CodeQL still analyzes and retains SARIF,
+while the stable `Dependency review` check performs a full Trivy scan of the repository lockfiles.
 
 Limit Actions to selected actions and reusable workflows. Every action in this example is pinned to
 a full commit SHA; enforce that through organization policy. Dependabot keeps those pins fresh.
