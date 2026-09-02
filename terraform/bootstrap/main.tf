@@ -7,6 +7,21 @@ locals {
   github_plan_subject = "repo:${var.repository}:environment:plan"
 }
 
+resource "aws_kms_key" "platform" {
+  description             = "${var.project} Terraform state and ECR encryption"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_kms_alias" "platform" {
+  name          = "alias/${var.project}-platform"
+  target_key_id = aws_kms_key.platform.key_id
+}
+
 resource "aws_s3_bucket" "state" {
   bucket = local.state_bucket_name
 
@@ -26,7 +41,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
   bucket = aws_s3_bucket.state.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      kms_master_key_id = aws_kms_key.platform.arn
+      sse_algorithm     = "aws:kms"
     }
     bucket_key_enabled = true
   }
@@ -45,7 +61,8 @@ resource "aws_ecr_repository" "app" {
   image_tag_mutability = "IMMUTABLE"
 
   encryption_configuration {
-    encryption_type = "AES256"
+    encryption_type = "KMS"
+    kms_key         = aws_kms_key.platform.arn
   }
 
   image_scanning_configuration {
@@ -140,6 +157,12 @@ resource "aws_iam_role_policy" "github_deploy" {
         Effect   = "Allow"
         Action   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
         Resource = each.key == "preview" ? "${aws_s3_bucket.state.arn}/services/pr-*" : "${aws_s3_bucket.state.arn}/services/${each.key}/terraform.tfstate*"
+      },
+      {
+        Sid      = "TerraformStateEncryption"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey"]
+        Resource = aws_kms_key.platform.arn
       },
       {
         Sid      = "ContainerRegistryLogin"
@@ -241,6 +264,12 @@ resource "aws_iam_role_policy" "github_plan" {
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.state.arn}/*"
+      },
+      {
+        Sid      = "TerraformStateDecryption"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:DescribeKey"]
+        Resource = aws_kms_key.platform.arn
       },
       {
         Sid    = "ReadApplicationResources"

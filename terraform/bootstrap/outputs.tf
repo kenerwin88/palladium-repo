@@ -10,6 +10,10 @@ output "ecr_repository" {
   value = aws_ecr_repository.app.name
 }
 
+output "kms_key_arn" {
+  value = aws_kms_key.platform.arn
+}
+
 output "plan_role_arn" {
   value = aws_iam_role.github_plan.arn
 }
