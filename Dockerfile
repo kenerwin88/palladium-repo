@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24.20.0-bookworm-slim AS frontend
+FROM node:26.8.1-bookworm-slim AS frontend
 WORKDIR /build
 RUN corepack enable
 COPY app/frontend/package.json app/frontend/pnpm-lock.yaml ./
