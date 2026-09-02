@@ -56,6 +56,11 @@ repository whose GitHub plan supports artifact attestations, create the reposito
 not provide attestation persistence; the signed workflow run, immutable artifact, digest, SBOM, and
 release manifest still provide the delivery evidence chain.
 
+CodeQL always performs both Python and JavaScript/TypeScript analysis and preserves each SARIF result
+as a 14-day workflow artifact. Public repositories also publish those results to GitHub code
+scanning automatically. For a private organization repository with GitHub Advanced Security, set
+`CODE_SCANNING_ENABLED=true` after enabling code scanning to publish the same results as alerts.
+
 Limit Actions to selected actions and reusable workflows. Every action in this example is pinned to
 a full commit SHA; enforce that through organization policy. Dependabot keeps those pins fresh.
 Grant the default workflow token read-only access. Each workflow declares its narrow write permissions.
