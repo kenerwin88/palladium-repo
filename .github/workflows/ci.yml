@@ -47,7 +47,7 @@ jobs:
           version: 10.23.0
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "24.7.0"
+          node-version: "24.15.0"
           cache: pnpm
           cache-dependency-path: app/frontend/pnpm-lock.yaml
       - run: pnpm --dir app/frontend install --frozen-lockfile
@@ -71,8 +71,9 @@ jobs:
       - run: terraform -chdir=terraform/live init -backend=false -input=false
       - run: terraform -chdir=terraform/live validate
       - name: Scan infrastructure configuration
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          trivy-version: v0.74.0
           scan-type: config
           scan-ref: terraform
           format: table
@@ -138,8 +139,9 @@ jobs:
             --tag "palladium-build:${SOURCE_SHA}" \
             .
       - name: Scan deployable image
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          trivy-version: v0.74.0
           image-ref: palladium-build:${{ steps.version.outputs.source_sha }}
           format: table
           exit-code: "1"
@@ -163,8 +165,9 @@ jobs:
           done
           curl --fail --silent --show-error "http://127.0.0.1:${port}/release/example" | grep -F '<app-root'
       - name: Generate CycloneDX SBOM
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          trivy-version: v0.74.0
           image-ref: palladium-build:${{ steps.version.outputs.source_sha }}
           format: cyclonedx
           output: /tmp/palladium-sbom.cdx.json

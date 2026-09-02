@@ -19,6 +19,7 @@ current_function_version="$(aws lambda get-alias --function-name "$function_name
   --name live --query FunctionVersion --output text)"
 target_function_version=""
 while IFS= read -r function_version; do
+  [[ "$function_version" =~ ^[0-9]+$ ]] || continue
   configured_version="$(aws lambda get-function-configuration \
     --function-name "$function_name" --qualifier "$function_version" \
     --query 'Environment.Variables.APP_VERSION' --output text)"
@@ -32,7 +33,7 @@ while IFS= read -r function_version; do
   target_function_version="$function_version"
   break
 done < <(aws lambda list-versions-by-function --function-name "$function_name" \
-  --query 'Versions[].Version' --output text | tr '\t' '\n' | sed '/^\$LATEST$/d' | sort -rn)
+  --query 'Versions[].Version' --output text | tr '\t' '\n' | sort -rn)
 
 [[ -n "$target_function_version" ]] || {
   echo "no retained Lambda version for release ${version}; roll forward instead" >&2

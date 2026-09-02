@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24.7.0-bookworm-slim AS frontend
+FROM node:24.15.0-bookworm-slim AS frontend
 WORKDIR /build
 RUN corepack enable
 COPY app/frontend/package.json app/frontend/pnpm-lock.yaml ./
@@ -35,4 +35,3 @@ EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=2s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"
 CMD ["gunicorn", "--bind=0.0.0.0:8080", "--workers=2", "--threads=4", "--access-logfile=-", "palladium:create_app()"]
-
