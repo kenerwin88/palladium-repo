@@ -10,7 +10,7 @@ RUN pnpm build
 
 FROM ghcr.io/astral-sh/uv:0.12.9 AS uv
 
-FROM python:3.13.15-slim-bookworm AS runtime
+FROM python:3.14.7-slim-bookworm AS runtime
 ARG APP_VERSION=dev
 ENV APP_ENV=production \
     APP_VERSION=${APP_VERSION} \
