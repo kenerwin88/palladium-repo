@@ -50,6 +50,12 @@ After all environments and variables exist, create the repository variable
 development-to-production delivery path. Leave it unset while copying or experimenting with this
 example so green CI is not obscured by predictable missing-AWS-configuration failures.
 
+Build provenance attestations are automatic for public repositories. For a private organization
+repository whose GitHub plan supports artifact attestations, create the repository variable
+`ATTESTATIONS_ENABLED=true`. Leave it unset for user-owned private repositories, where GitHub does
+not provide attestation persistence; the signed workflow run, immutable artifact, digest, SBOM, and
+release manifest still provide the delivery evidence chain.
+
 Limit Actions to selected actions and reusable workflows. Every action in this example is pinned to
 a full commit SHA; enforce that through organization policy. Dependabot keeps those pins fresh.
 Grant the default workflow token read-only access. Each workflow declares its narrow write permissions.

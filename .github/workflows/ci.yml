@@ -177,7 +177,9 @@ jobs:
           SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
         run: docker save --output /tmp/palladium-image.tar "palladium-build:${SOURCE_SHA}"
       - name: Attest main artifact provenance
-        if: github.event_name == 'push'
+        if: >-
+          github.event_name == 'push' &&
+          (github.event.repository.private == false || vars.ATTESTATIONS_ENABLED == 'true')
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-path: /tmp/palladium-image.tar
