@@ -1,0 +1,38 @@
+name: Preview destroy
+
+on: # zizmor: ignore[dangerous-triggers] close-only cleanup checks out main and treats the PR number as validated data.
+  pull_request_target:
+    types: [closed]
+
+concurrency:
+  group: deploy-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  destroy:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: preview
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          ref: main
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+      - name: Destroy isolated preview
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          PREVIEW_NUMBER: ${{ github.event.pull_request.number }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: ./scripts/ci/destroy.sh "pr-${PREVIEW_NUMBER}"

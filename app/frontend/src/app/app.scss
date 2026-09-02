@@ -1,0 +1,234 @@
+:host {
+  display: block;
+}
+
+main,
+footer {
+  width: min(1180px, calc(100% - 48px));
+  margin-inline: auto;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 92px;
+  border-bottom: 1px solid var(--line);
+  a {
+    color: var(--ink-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink) !important;
+  font-family: var(--serif);
+  font-size: 1.15rem !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  color: var(--gold);
+  font-family: var(--serif);
+}
+
+.hero {
+  display: grid;
+  min-height: 630px;
+  align-content: center;
+  padding: 72px 0;
+}
+.eyebrow {
+  margin: 0 0 22px;
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.18em;
+}
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 900px;
+  margin-bottom: 28px;
+  font-family: var(--serif);
+  font-size: clamp(4rem, 10vw, 8.2rem);
+  font-weight: 400;
+  letter-spacing: -0.06em;
+  line-height: 0.82;
+  em {
+    color: var(--gold-light);
+    font-weight: 400;
+  }
+}
+
+.lede {
+  max-width: 590px;
+  margin-bottom: 48px;
+  color: var(--ink-muted);
+  font-size: clamp(1.05rem, 2vw, 1.32rem);
+  line-height: 1.6;
+}
+
+.status-card {
+  display: flex;
+  width: min(560px, 100%);
+  align-items: flex-start;
+  gap: 18px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  strong,
+  span {
+    display: block;
+  }
+  strong {
+    margin: 4px 0 5px;
+    font-size: 0.96rem;
+    font-weight: 550;
+  }
+}
+
+.status-label,
+.metadata {
+  color: var(--ink-muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pulse {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #65c18c;
+  box-shadow: 0 0 0 5px rgb(101 193 140 / 12%);
+}
+.pulse.loading {
+  background: var(--gold);
+  box-shadow: 0 0 0 5px rgb(189 155 91 / 12%);
+}
+.pulse.error {
+  background: #d27979;
+  box-shadow: 0 0 0 5px rgb(210 121 121 / 12%);
+}
+
+.principles {
+  padding: 90px 0 110px;
+  border-top: 1px solid var(--line);
+}
+.section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 30px;
+  margin-bottom: 64px;
+  .eyebrow {
+    margin-bottom: 9px;
+  }
+}
+
+h2 {
+  margin-bottom: 0;
+  font-family: var(--serif);
+  font-size: clamp(2rem, 5vw, 3.7rem);
+  font-weight: 400;
+  letter-spacing: -0.04em;
+}
+ol {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+}
+li {
+  min-height: 230px;
+  padding: 28px 36px 20px 0;
+  border-top: 1px solid var(--line);
+  & + li {
+    padding-left: 36px;
+    border-left: 1px solid var(--line);
+  }
+  > span {
+    color: var(--gold);
+    font-family: ui-monospace, monospace;
+    font-size: 0.7rem;
+  }
+  p {
+    color: var(--ink-muted);
+    line-height: 1.65;
+  }
+}
+h3 {
+  margin: 52px 0 12px;
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  font-weight: 400;
+}
+
+footer {
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 700px) {
+  main,
+  footer {
+    width: min(100% - 32px, 1180px);
+  }
+  .hero {
+    min-height: 600px;
+  }
+  h1 {
+    font-size: clamp(3.7rem, 18vw, 6rem);
+  }
+  .section-heading,
+  footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  ol {
+    grid-template-columns: 1fr;
+  }
+  li,
+  li + li {
+    min-height: auto;
+    padding: 26px 0 34px;
+    border-left: 0;
+  }
+  h3 {
+    margin-top: 28px;
+  }
+  footer {
+    justify-content: center;
+    gap: 8px;
+  }
+}

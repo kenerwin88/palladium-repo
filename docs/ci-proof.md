@@ -1,0 +1,25 @@
+# CI proof
+
+CI is deliberately a ladder: each layer answers a different failure question, and delivery consumes
+the already-proved artifact.
+
+| Proof | What it establishes |
+|---|---|
+| Ruff formatting/lint + mypy | Python style and static contracts |
+| pytest + Angular Vitest | Backend and frontend behavior in isolation |
+| Prettier + Angular production build | Reproducible, budgeted browser bundle |
+| Terraform format/validate + Trivy config | Valid IaC and no high/critical detected misconfiguration |
+| zizmor + ShellCheck | Workflow and delivery-script safety |
+| Dependency review | No newly introduced high-severity dependency advisory or denied license |
+| CodeQL for Python and JS/TS | Semantic source vulnerability analysis |
+| Production image Trivy scan | No detected high/critical fixed image vulnerability |
+| CycloneDX SBOM + provenance attestation | Inventory and build-origin evidence |
+| Container health + SPA deep link | The actual packaged Flask/Angular image boots and routes correctly |
+| Preview Playwright, desktop + mobile | The deployed PR UI, API, console, and deep links behave together |
+| Three PR Terraform plans | Visible “if merged” effect on each long-lived environment |
+| Staging Playwright, desktop + mobile | The exact candidate behaves in a production-shaped environment |
+| Production smoke + release manifest | Approved exact plan ran, expected version is live, evidence is durable |
+
+Fork PRs receive all unprivileged source checks but not a cloud preview or state-backed plan. A
+same-repository PR receives only the dedicated read-only plan role. The deterministic CI checks—not
+cloud availability—are branch requirements, so an AWS outage cannot prevent source recovery work.

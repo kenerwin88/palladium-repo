@@ -1,0 +1,47 @@
+name: Preview reaper
+
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: preview-reaper
+  cancel-in-progress: false
+
+jobs:
+  destroy-expired:
+    runs-on: ubuntu-latest
+    environment: preview
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          ref: main
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+      - name: Destroy previews past their TTL
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          aws lambda list-functions \
+            --query "Functions[?starts_with(FunctionName, '${ECR_REPOSITORY}-pr-')].[FunctionName,FunctionArn]" \
+            --output text | while read -r name arn; do
+              expires_at="$(aws lambda list-tags --resource "$arn" --query 'Tags.ExpiresAt' --output text)"
+              if [[ "$expires_at" != "None" && -n "$expires_at" && "$expires_at" < "$now" ]]; then
+                preview="${name#${ECR_REPOSITORY}-}"
+                ./scripts/ci/destroy.sh "$preview"
+              fi
+            done

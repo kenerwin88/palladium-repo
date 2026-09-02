@@ -1,0 +1,23 @@
+[tools]
+node = "24.7.0"
+pnpm = "10.23.0"
+python = "3.13.7"
+terraform = "1.14.8"
+uv = "0.12.9"
+
+[env]
+_.file = ".env"
+UV_PROJECT = "app/backend"
+
+[tasks.setup]
+description = "Install all application dependencies"
+run = "uv sync --project app/backend --all-groups && pnpm --dir app/frontend install --frozen-lockfile"
+
+[tasks.dev]
+description = "Start the API and frontend with live reload"
+run = "docker compose up --build --remove-orphans"
+
+[tasks.check]
+description = "Run the same fast checks as CI"
+run = "./scripts/check.sh"
+

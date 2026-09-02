@@ -1,0 +1,43 @@
+name: palladium
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: app/backend/Dockerfile.dev
+    environment:
+      APP_ENV: local
+      APP_VERSION: dev
+      FLASK_DEBUG: "1"
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./app/backend:/workspace
+      - backend-venv:/workspace/.venv
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5000/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  frontend:
+    image: node:24.7.0-bookworm-slim
+    working_dir: /workspace
+    command: >-
+      sh -c "corepack enable && pnpm install --frozen-lockfile &&
+      pnpm start --host 0.0.0.0 --poll 1000 --proxy-config proxy.conf.json"
+    environment:
+      NG_CLI_ANALYTICS: "false"
+    ports:
+      - "4200:4200"
+    volumes:
+      - ./app/frontend:/workspace
+      - frontend-node-modules:/workspace/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  backend-venv:
+  frontend-node-modules:
+

@@ -1,0 +1,40 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+htmlcov/
+.coverage
+
+# Angular / Node
+node_modules/
+dist/
+.angular/
+coverage/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local tooling
+.mise.local.toml
+.cache/
+

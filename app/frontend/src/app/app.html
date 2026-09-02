@@ -1,0 +1,76 @@
+<main>
+  <nav aria-label="Primary navigation">
+    <a class="brand" href="/" aria-label="Palladium home">
+      <span class="mark" aria-hidden="true">P</span>
+      <span>Palladium</span>
+    </a>
+    <a href="https://github.com" target="_blank" rel="noreferrer">View the workflow</a>
+  </nav>
+
+  <section class="hero">
+    <p class="eyebrow">REFERENCE DELIVERY PLATFORM</p>
+    <h1>Shipping should feel<br /><em>calm.</em></h1>
+    <p class="lede">
+      One trunk. One immutable artifact. A clear path from pull request to production.
+    </p>
+
+    <div class="status-card" aria-live="polite">
+      @if (greeting(); as current) {
+        <div class="pulse" aria-hidden="true"></div>
+        <div>
+          <span class="status-label">LIVE SYSTEM</span>
+          <strong>{{ current.message }}</strong>
+          <span class="metadata">{{ current.environment }} · {{ current.version }}</span>
+        </div>
+      } @else if (error()) {
+        <div class="pulse error" aria-hidden="true"></div>
+        <div>
+          <span class="status-label">API UNAVAILABLE</span>
+          <strong>The frontend is ready; start the Flask service to connect it.</strong>
+        </div>
+      } @else {
+        <div class="pulse loading" aria-hidden="true"></div>
+        <div>
+          <span class="status-label">CONNECTING</span>
+          <strong>Checking this environment…</strong>
+        </div>
+      }
+    </div>
+  </section>
+
+  <section class="principles" aria-labelledby="principles-heading">
+    <div class="section-heading">
+      <p class="eyebrow">THE DELIVERY CONTRACT</p>
+      <h2 id="principles-heading">Boring in all the right ways.</h2>
+    </div>
+    <ol>
+      <li>
+        <span>01</span>
+        <h3>Prove every change</h3>
+        <p>
+          Fast local checks become required CI checks. Preview the real artifact before merging.
+        </p>
+      </li>
+      <li>
+        <span>02</span>
+        <h3>Build exactly once</h3>
+        <p>
+          The same scanned container digest is promoted through development, staging, and
+          production.
+        </p>
+      </li>
+      <li>
+        <span>03</span>
+        <h3>Make recovery ordinary</h3>
+        <p>
+          Small trunk merges, visible releases, and immutable versions make roll-forward routine.
+        </p>
+      </li>
+    </ol>
+  </section>
+</main>
+
+<footer>
+  <span>Designed for continuous delivery</span>
+  <span>Angular + Flask + Terraform + GitHub Actions</span>
+</footer>

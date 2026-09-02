@@ -1,0 +1,96 @@
+name: Platform bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: AWS region
+        required: true
+        default: us-east-2
+        type: string
+
+concurrency:
+  group: bootstrap-platform
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: bootstrap
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ inputs.aws_region }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Configure the shared deployment account
+        id: config
+        env:
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          bucket="palladium-${account_id}-${AWS_REGION}-tfstate"
+          echo "bucket=${bucket}" >>"$GITHUB_OUTPUT"
+          echo 'environments=["development","staging","production","preview","flcm"]' >>"$GITHUB_OUTPUT"
+      - name: Initialize or reconnect bootstrap state
+        env:
+          TF_VAR_aws_region: ${{ inputs.aws_region }}
+          TF_VAR_github_environments: ${{ steps.config.outputs.environments }}
+          TF_VAR_repository: ${{ github.repository }}
+          STATE_BUCKET: ${{ steps.config.outputs.bucket }}
+        run: |
+          bucket="$STATE_BUCKET"
+          if aws s3api head-bucket --bucket "$bucket" 2>/dev/null; then
+            cp terraform/bootstrap/backend.tf.example terraform/bootstrap/backend.tf
+            terraform -chdir=terraform/bootstrap init -reconfigure -input=false \
+              -backend-config="bucket=${bucket}" \
+              -backend-config="key=bootstrap/terraform.tfstate" \
+              -backend-config="region=${TF_VAR_aws_region}"
+          else
+            terraform -chdir=terraform/bootstrap init -input=false
+            terraform -chdir=terraform/bootstrap apply -auto-approve -input=false \
+              -target=aws_s3_bucket.state \
+              -target=aws_s3_bucket_public_access_block.state \
+              -target=aws_s3_bucket_server_side_encryption_configuration.state \
+              -target=aws_s3_bucket_versioning.state
+            cp terraform/bootstrap/backend.tf.example terraform/bootstrap/backend.tf
+            terraform -chdir=terraform/bootstrap init -migrate-state -force-copy -input=false \
+              -backend-config="bucket=${bucket}" \
+              -backend-config="key=bootstrap/terraform.tfstate" \
+              -backend-config="region=${TF_VAR_aws_region}"
+          fi
+          terraform -chdir=terraform/bootstrap apply -auto-approve -input=false
+      - name: Print GitHub Environment configuration
+        env:
+          AWS_REGION: ${{ inputs.aws_region }}
+          STATE_BUCKET: ${{ steps.config.outputs.bucket }}
+        run: |
+          roles="$(terraform -chdir=terraform/bootstrap output -json deploy_role_arns)"
+          plan_role="$(terraform -chdir=terraform/bootstrap output -raw plan_role_arn)"
+          repository="$(terraform -chdir=terraform/bootstrap output -raw ecr_repository)"
+          {
+            echo "### Shared deployment account is ready"
+            echo
+            echo "Set the matching role on each deploy GitHub Environment:"
+            jq -r 'to_entries[] | "- `\(.key)`: `AWS_ROLE_ARN=\(.value)`"' <<<"$roles"
+            echo
+            echo "Set these shared values on every environment:"
+            echo "- \`AWS_REGION=${AWS_REGION}\`"
+            echo "- \`ECR_REPOSITORY=${repository}\`"
+            echo "- \`TF_STATE_BUCKET=${STATE_BUCKET}\`"
+            echo
+            echo "For the \`plan\` Environment, use \`AWS_ROLE_ARN=${plan_role}\` and the same region, repository, and state bucket."
+            echo
+            echo "Now delete the temporary credentials from \`bootstrap\`."
+          } >>"$GITHUB_STEP_SUMMARY"

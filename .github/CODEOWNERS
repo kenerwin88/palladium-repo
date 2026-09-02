@@ -1,0 +1,5 @@
+* @your-org/platform-team
+/.github/ @your-org/platform-team
+/terraform/ @your-org/platform-team
+/app/backend/ @your-org/backend-team
+/app/frontend/ @your-org/frontend-team

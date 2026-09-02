@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap');
+
+:root {
+  color-scheme: dark;
+  --background: #101210;
+  --surface: #171a17;
+  --ink: #eeefe9;
+  --ink-muted: #9da098;
+  --line: #2d302c;
+  --gold: #bd9b5b;
+  --gold-light: #d4b875;
+  --serif: 'Instrument Serif', Georgia, serif;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 78% 11%, rgb(189 155 91 / 8%), transparent 24rem), var(--background);
+  color: var(--ink);
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--background);
+}

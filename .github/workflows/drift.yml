@@ -1,0 +1,62 @@
+name: Infrastructure drift
+
+on:
+  schedule:
+    - cron: "17 12 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  plan:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [development, staging, production]
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.environment }}
+    concurrency:
+      group: deploy-${{ matrix.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Refresh-only plan
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          ENVIRONMENT: ${{ matrix.environment }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          terraform -chdir=terraform/live init -reconfigure -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=services/${ENVIRONMENT}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+          image_uri="$(terraform -chdir=terraform/live output -raw image_uri)"
+          version="$(terraform -chdir=terraform/live output -raw runtime_version)"
+          set +e
+          terraform -chdir=terraform/live plan -refresh-only -detailed-exitcode -input=false \
+            -var-file="tfvars/${ENVIRONMENT}.tfvars" \
+            -var="aws_region=${AWS_REGION}" \
+            -var="image_uri=${image_uri}" \
+            -var="project=${ECR_REPOSITORY}" \
+            -var="repository=${GITHUB_REPOSITORY}" \
+            -var="application_version=${version}"
+          result=$?
+          set -e
+          if [[ "$result" == 2 ]]; then
+            echo "::error::Terraform detected drift in ${ENVIRONMENT}."
+            exit 1
+          fi
+          exit "$result"

@@ -1,0 +1,12 @@
+{
+  "/api": {
+    "target": "http://api:5000",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/healthz": {
+    "target": "http://api:5000",
+    "secure": false,
+    "changeOrigin": true
+  }
+}

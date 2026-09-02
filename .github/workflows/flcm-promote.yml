@@ -1,0 +1,125 @@
+name: Pin FLCM release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released calendar version, without the release- prefix
+        required: true
+        type: string
+      change_record:
+        description: Required audit or change-ticket reference
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-flcm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: plan
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_uri: ${{ steps.release.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: v${{ inputs.version }}
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Resolve and verify the published release
+        id: release
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]
+          gh release download "v${VERSION}" --pattern release-manifest.json --dir /tmp --repo "$GITHUB_REPOSITORY"
+          digest="$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=release-${VERSION}" --query 'imageDetails[0].imageDigest' --output text)"
+          manifest_digest="$(jq -r '.artifact.digest' /tmp/release-manifest.json)"
+          [[ "$digest" == "$manifest_digest" ]] || { echo "release manifest and ECR disagree" >&2; exit 1; }
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          echo "image_uri=${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${digest}" >>"$GITHUB_OUTPUT"
+      - name: Create the exact FLCM plan
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_URI: ${{ steps.release.outputs.image_uri }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/ci/plan.sh flcm "$IMAGE_URI" "$VERSION" /tmp/flcm.tfplan /tmp/flcm.txt
+      - name: Summarize the change awaiting approval
+        env:
+          CHANGE_RECORD: ${{ inputs.change_record }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          {
+            echo "### FLCM plan awaiting approval"
+            echo
+            echo "- Change record: \`${CHANGE_RECORD}\`"
+            echo "- Release: \`${VERSION}\`"
+            echo
+            echo '```hcl'
+            head -c 60000 /tmp/flcm.txt
+            echo
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flcm-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/flcm.tfplan
+            /tmp/flcm.txt
+            /tmp/release-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: flcm
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: v${{ inputs.version }}
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: flcm-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/flcm-plan
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Apply only the approved FLCM plan
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          CHANGE_RECORD: ${{ inputs.change_record }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/ci/apply-environment-plan.sh flcm "$VERSION" /tmp/flcm-plan/flcm.tfplan

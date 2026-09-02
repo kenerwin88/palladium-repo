@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/palladium/release-manifest.schema.json",
+  "title": "Palladium release manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "source", "build", "delivery", "artifact", "sbom", "infrastructure", "promotions", "policy"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "release": { "$ref": "#/$defs/release" },
+    "source": { "$ref": "#/$defs/source" },
+    "build": { "$ref": "#/$defs/build" },
+    "delivery": { "$ref": "#/$defs/delivery" },
+    "artifact": { "$ref": "#/$defs/artifact" },
+    "sbom": { "$ref": "#/$defs/sbom" },
+    "infrastructure": { "$ref": "#/$defs/infrastructure" },
+    "promotions": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "#/$defs/promotion" }
+    },
+    "policy": { "$ref": "#/$defs/policy" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "version": { "type": "string", "pattern": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}\\.[0-9]+$" },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "tag", "status", "released_at"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "tag": { "type": "string", "pattern": "^v[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}\\.[0-9]+$" },
+        "status": { "const": "released" },
+        "released_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "git_sha"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+        "git_sha": { "$ref": "#/$defs/gitSha" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow", "run_id", "run_attempt", "run_url", "artifact_name"],
+      "properties": {
+        "workflow": { "const": "CI" },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "run_url": { "type": "string", "format": "uri" },
+        "artifact_name": { "type": "string" }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow", "run_id", "run_attempt", "run_url"],
+      "properties": {
+        "workflow": { "const": "Delivery" },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "run_url": { "type": "string", "format": "uri" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registry", "repository", "image_uri", "digest", "release_tag"],
+      "properties": {
+        "registry": { "const": "Amazon ECR" },
+        "repository": { "type": "string" },
+        "image_uri": { "type": "string", "pattern": "@sha256:[0-9a-f]{64}$" },
+        "digest": { "$ref": "#/$defs/sha256" },
+        "release_tag": { "type": "string", "pattern": "^release-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}\\.[0-9]+$" }
+      }
+    },
+    "sbom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "file", "sha256"],
+      "properties": {
+        "format": { "const": "CycloneDX JSON" },
+        "file": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "image_uri", "url", "verified"],
+      "properties": {
+        "environment": { "enum": ["development", "staging", "production"] },
+        "image_uri": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "verified": { "const": true }
+      }
+    },
+    "infrastructure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_git_sha", "roots", "state_keys", "production_plan_artifact"],
+      "properties": {
+        "source_git_sha": { "$ref": "#/$defs/gitSha" },
+        "roots": {
+          "type": "array",
+          "prefixItems": [{ "const": "terraform/bootstrap" }, { "const": "terraform/live" }],
+          "items": false
+        },
+        "state_keys": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["development", "staging", "production"],
+          "properties": {
+            "development": { "const": "services/development/terraform.tfstate" },
+            "staging": { "const": "services/staging/terraform.tfstate" },
+            "production": { "const": "services/production/terraform.tfstate" }
+          }
+        },
+        "production_plan_artifact": { "type": "string", "pattern": "^production-plan-[0-9]+-[0-9]+$" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build_once", "same_ecr_repository", "hotfix_path", "default_recovery", "emergency_restore_scope", "flcm_eligible", "flcm_pin"],
+      "properties": {
+        "build_once": { "const": true },
+        "same_ecr_repository": { "const": true },
+        "hotfix_path": { "const": "standard-trunk-promotion" },
+        "default_recovery": { "const": "roll-forward" },
+        "emergency_restore_scope": { "const": "application-alias-only" },
+        "flcm_eligible": { "const": true },
+        "flcm_pin": { "type": "string", "pattern": "^release-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}\\.[0-9]+$" }
+      }
+    }
+  }
+}

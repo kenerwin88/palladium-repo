@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  merge_group:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.9"
+          enable-cache: true
+          cache-dependency-glob: app/backend/uv.lock
+      - run: uv sync --project app/backend --frozen --all-groups
+      - run: uv run --project app/backend ruff format --check app/backend
+      - run: uv run --project app/backend ruff check app/backend
+      - run: uv run --project app/backend mypy app/backend/src
+      - run: uv run --project app/backend pytest
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.23.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24.7.0"
+          cache: pnpm
+          cache-dependency-path: app/frontend/pnpm-lock.yaml
+      - run: pnpm --dir app/frontend install --frozen-lockfile
+      - run: pnpm --dir app/frontend format:check
+      - run: pnpm --dir app/frontend test:ci
+      - run: pnpm --dir app/frontend build
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+      - run: terraform fmt -check -recursive terraform
+      - run: terraform -chdir=terraform/bootstrap init -backend=false -input=false
+      - run: terraform -chdir=terraform/bootstrap validate
+      - run: terraform -chdir=terraform/live init -backend=false -input=false
+      - run: terraform -chdir=terraform/live validate
+      - name: Scan infrastructure configuration
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: config
+          scan-ref: terraform
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+
+  workflow-security:
+    name: Workflow security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.9"
+          enable-cache: false
+      - run: uvx zizmor==1.30.0 .github/workflows
+      - run: find scripts -name '*.sh' -print0 | xargs -0 shellcheck
+      - run: uvx check-jsonschema==0.38.0 --schemafile docs/release-manifest.schema.json docs/examples/release-manifest.json
+
+  package:
+    name: Immutable artifact
+    needs: [backend, frontend, terraform, workflow-security]
+    if: >-
+      github.event_name == 'push' || github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Derive deterministic version
+        id: version
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            source_sha="${PR_SHA}"
+            version="pr-${PR_NUMBER}-${source_sha:0:7}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "merge_group" ]]; then
+            source_sha="${GITHUB_SHA}"
+            version="merge-queue-${source_sha:0:7}"
+          else
+            source_sha="${GITHUB_SHA}"
+            date_part="$(git show -s --date=format:%Y.%m.%d --format=%cd HEAD)"
+            version="${date_part}.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "source_sha=${source_sha}" >>"$GITHUB_OUTPUT"
+          echo "value=${version}" >>"$GITHUB_OUTPUT"
+      - name: Build once
+        env:
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          docker build \
+            --build-arg "APP_VERSION=${VERSION}" \
+            --tag "palladium-build:${SOURCE_SHA}" \
+            .
+      - name: Scan deployable image
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          image-ref: palladium-build:${{ steps.version.outputs.source_sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Prove the production container contract
+        env:
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          container_id="$(docker run --detach --publish 127.0.0.1::8080 "palladium-build:${SOURCE_SHA}")"
+          trap 'docker logs "$container_id"; docker rm --force "$container_id" >/dev/null' EXIT
+          port="$(docker port "$container_id" 8080/tcp | cut -d: -f2)"
+          for attempt in {1..20}; do
+            if payload="$(curl --fail --silent --show-error "http://127.0.0.1:${port}/healthz")"; then
+              jq -e --arg version "$VERSION" '.status == "ok" and .version == $version' <<<"$payload"
+              break
+            fi
+            [[ "$attempt" != 20 ]] || exit 1
+            sleep 1
+          done
+          curl --fail --silent --show-error "http://127.0.0.1:${port}/release/example" | grep -F '<app-root'
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          image-ref: palladium-build:${{ steps.version.outputs.source_sha }}
+          format: cyclonedx
+          output: /tmp/palladium-sbom.cdx.json
+          scan-type: image
+      - name: Save deployable image
+        env:
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
+        run: docker save --output /tmp/palladium-image.tar "palladium-build:${SOURCE_SHA}"
+      - name: Attest main artifact provenance
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: /tmp/palladium-image.tar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deployable-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/palladium-image.tar
+            /tmp/palladium-sbom.cdx.json
+          compression-level: 1
+          if-no-files-found: error
+          retention-days: 7

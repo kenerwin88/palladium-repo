@@ -1,0 +1,249 @@
+name: Delivery
+
+on: # zizmor: ignore[dangerous-triggers] workflow_run uses only a successful main artifact and trusted IaC.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: delivery
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  prepare:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        env:
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+        run: |
+          date_part="$(git show -s --date=format:%Y.%m.%d --format=%cd HEAD)"
+          echo "value=${date_part}.${RUN_NUMBER}" >>"$GITHUB_OUTPUT"
+
+  development:
+    needs: prepare
+    uses: $/.github/workflows/_deploy.yml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    with:
+      credentials_environment: development
+      environment: development
+      infrastructure_ref: ${{ github.event.workflow_run.head_sha }}
+      run_id: ${{ github.event.workflow_run.id }}
+      run_attempt: ${{ github.event.workflow_run.run_attempt }}
+      source_sha: ${{ github.event.workflow_run.head_sha }}
+      version: ${{ needs.prepare.outputs.version }}
+
+  staging:
+    needs: [prepare, development]
+    uses: $/.github/workflows/_deploy.yml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    with:
+      credentials_environment: staging
+      environment: staging
+      infrastructure_ref: ${{ github.event.workflow_run.head_sha }}
+      run_id: ${{ github.event.workflow_run.id }}
+      run_attempt: ${{ github.event.workflow_run.run_attempt }}
+      source_sha: ${{ github.event.workflow_run.head_sha }}
+      version: ${{ needs.prepare.outputs.version }}
+
+  staging-acceptance:
+    needs: [staging]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd0ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.23.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24.7.0"
+          cache: pnpm
+          cache-dependency-path: app/frontend/pnpm-lock.yaml
+      - run: pnpm --dir app/frontend install --frozen-lockfile
+      - run: pnpm --dir app/frontend exec playwright install --with-deps chromium
+      - name: Exercise staging in desktop and mobile Chromium
+        env:
+          BASE_URL: ${{ needs.staging.outputs.url }}
+        run: pnpm --dir app/frontend e2e
+
+  production-plan:
+    needs: [prepare, staging, staging-acceptance]
+    runs-on: ubuntu-latest
+    environment: plan
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Create the exact production plan
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_URI: ${{ needs.staging.outputs.image_uri }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: >-
+          ./scripts/ci/plan.sh production "$IMAGE_URI" "$VERSION"
+          /tmp/production.tfplan /tmp/production.txt
+      - name: Put the production diff in the run summary
+        run: |
+          {
+            echo "### Production Terraform plan"
+            echo
+            echo "This is the exact plan the protected production job will apply."
+            echo
+            echo '<details><summary>Show plan</summary>'
+            echo
+            echo '```hcl'
+            head -c 60000 /tmp/production.txt
+            echo
+            echo '```'
+            echo '</details>'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/production.tfplan
+            /tmp/production.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  production:
+    needs: [prepare, staging, production-plan]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    outputs:
+      url: ${{ steps.apply.outputs.url }}
+      image_uri: ${{ needs.staging.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: production-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/production-plan
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Apply only the reviewed plan and verify production
+        id: apply
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_URI: ${{ needs.staging.outputs.image_uri }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: >-
+          ./scripts/ci/apply-plan.sh production "$VERSION"
+          "${{ github.event.workflow_run.id }}" "${{ github.event.workflow_run.run_attempt }}"
+          "$IMAGE_URI" /tmp/production-plan/production.tfplan
+
+  release:
+    needs: [prepare, development, staging, production]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: deployable-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: /tmp/deployable
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Generate the audit release manifest
+        env:
+          DEVELOPMENT_URL: ${{ needs.development.outputs.url }}
+          DELIVERY_RUN_ATTEMPT: ${{ github.run_attempt }}
+          DELIVERY_RUN_ID: ${{ github.run_id }}
+          IMAGE_URI: ${{ needs.production.outputs.image_uri }}
+          PRODUCTION_URL: ${{ needs.production.outputs.url }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          SBOM_FILE: /tmp/deployable/palladium-sbom.cdx.json
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          STAGING_URL: ${{ needs.staging.outputs.url }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          repository_path="${IMAGE_URI%%@*}"
+          export ECR_REPOSITORY="${repository_path##*/}"
+          ./scripts/ci/release-manifest.sh /tmp/release-manifest.json
+      - name: Publish calendar-versioned GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          unique_manifest="/tmp/release-manifest-delivery-${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}.json"
+          cp /tmp/release-manifest.json "$unique_manifest"
+          if gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            mkdir -p /tmp/existing-release
+            gh release download "v${VERSION}" --pattern release-manifest.json \
+              --dir /tmp/existing-release --repo "$GITHUB_REPOSITORY"
+            jq -e --arg digest "$(jq -r '.artifact.digest' /tmp/release-manifest.json)" \
+              --arg sha "$SHA" \
+              '.artifact.digest == $digest and .source.git_sha == $sha' \
+              /tmp/existing-release/release-manifest.json >/dev/null
+            gh release upload "v${VERSION}" "$unique_manifest" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "v${VERSION}" /tmp/release-manifest.json \
+              /tmp/deployable/palladium-sbom.cdx.json \
+              --repo "$GITHUB_REPOSITORY" --target "$SHA" --generate-notes --title "$VERSION"
+          fi

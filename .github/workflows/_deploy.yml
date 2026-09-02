@@ -1,0 +1,87 @@
+name: Deploy immutable artifact
+
+on:
+  workflow_call:
+    inputs:
+      credentials_environment:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      expires_at:
+        required: false
+        type: string
+        default: ""
+      infrastructure_ref:
+        required: true
+        type: string
+      run_id:
+        required: true
+        type: string
+      run_attempt:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+    outputs:
+      image_uri:
+        description: Deployed immutable ECR digest URI
+        value: ${{ jobs.deploy.outputs.image_uri }}
+      url:
+        description: Deployed environment URL
+        value: ${{ jobs.deploy.outputs.url }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.credentials_environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    outputs:
+      image_uri: ${{ steps.deploy.outputs.image_uri }}
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.infrastructure_ref }}
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: deployable-${{ inputs.run_id }}-${{ inputs.run_attempt }}
+          path: /tmp/deployable
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Deploy and smoke test
+        id: deploy
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          EXPIRES_AT: ${{ inputs.expires_at }}
+          RUN_ATTEMPT: ${{ inputs.run_attempt }}
+          RUN_ID: ${{ inputs.run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          VERSION: ${{ inputs.version }}
+        run: >-
+          ./scripts/ci/deploy.sh "$TARGET_ENVIRONMENT" "$VERSION" "$SOURCE_SHA"
+          "$RUN_ID" "$RUN_ATTEMPT" /tmp/deployable/palladium-image.tar "$EXPIRES_AT"

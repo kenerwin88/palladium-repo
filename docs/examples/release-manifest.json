@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "release": { "version": "2026.09.02.184", "tag": "v2026.09.02.184", "status": "released", "released_at": "2026-09-02T18:42:11Z" },
+  "source": { "repository": "example/palladium", "git_sha": "0123456789abcdef0123456789abcdef01234567" },
+  "build": { "workflow": "CI", "run_id": 123456789, "run_attempt": 2, "run_url": "https://github.com/example/palladium/actions/runs/123456789/attempts/2", "artifact_name": "deployable-123456789-2" },
+  "delivery": { "workflow": "Delivery", "run_id": 223456789, "run_attempt": 1, "run_url": "https://github.com/example/palladium/actions/runs/223456789/attempts/1" },
+  "artifact": { "registry": "Amazon ECR", "repository": "palladium", "image_uri": "123456789012.dkr.ecr.us-east-2.amazonaws.com/palladium@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "release_tag": "release-2026.09.02.184" },
+  "sbom": { "format": "CycloneDX JSON", "file": "palladium-sbom.cdx.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+  "infrastructure": { "source_git_sha": "0123456789abcdef0123456789abcdef01234567", "roots": ["terraform/bootstrap", "terraform/live"], "state_keys": { "development": "services/development/terraform.tfstate", "staging": "services/staging/terraform.tfstate", "production": "services/production/terraform.tfstate" }, "production_plan_artifact": "production-plan-223456789-1" },
+  "promotions": [
+    { "environment": "development", "image_uri": "123456789012.dkr.ecr.us-east-2.amazonaws.com/palladium@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "url": "https://development.example.test/", "verified": true },
+    { "environment": "staging", "image_uri": "123456789012.dkr.ecr.us-east-2.amazonaws.com/palladium@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "url": "https://staging.example.test/", "verified": true },
+    { "environment": "production", "image_uri": "123456789012.dkr.ecr.us-east-2.amazonaws.com/palladium@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "url": "https://production.example.test/", "verified": true }
+  ],
+  "policy": { "build_once": true, "same_ecr_repository": true, "hotfix_path": "standard-trunk-promotion", "default_recovery": "roll-forward", "emergency_restore_scope": "application-alias-only", "flcm_eligible": true, "flcm_pin": "release-2026.09.02.184" }
+}
