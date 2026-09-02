@@ -143,9 +143,11 @@ on CalVer. Full reasoning is in [ADR 0002](docs/adr/0002-calendar-versioning.md)
 3. Create `preview`, `plan`, `development`, `staging`, `production`, and `flcm`; copy the values shown
    in the summary. `plan` receives the plan role ARN, while every deploy environment receives the
    deploy role ARN. Delete the bootstrap credentials immediately.
-4. Configure the rules in [repository setup](docs/repository-setup.md), especially the merge queue and
+4. Set the repository variable `DEPLOYMENTS_ENABLED=true`. Until this explicit final switch,
+   successful CI runs do not attempt preview or persistent-environment deployment.
+5. Configure the rules in [repository setup](docs/repository-setup.md), especially the merge queue and
    production reviewers.
-5. Open a small pull request. Its preview is the acceptance test for the platform itself.
+6. Open a small pull request. Its preview is the acceptance test for the platform itself.
 
 After bootstrap, no developer or workflow needs a long-lived AWS key and no deployment is performed
 outside GitHub Actions.

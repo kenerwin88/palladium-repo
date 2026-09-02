@@ -21,7 +21,7 @@ services:
       retries: 10
 
   frontend:
-    image: node:24.15.0-bookworm-slim
+    image: node:24.20.0-bookworm-slim
     working_dir: /workspace
     command: >-
       sh -c "corepack enable && pnpm install --frozen-lockfile &&

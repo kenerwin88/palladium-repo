@@ -45,6 +45,11 @@ and `flcm` use their matching environment-scoped deploy role. `plan` alone uses 
 state and cloud resources but cannot apply changes. Protect `flcm` like production and require the
 operator to supply a change-record identifier.
 
+After all environments and variables exist, create the repository variable
+`DEPLOYMENTS_ENABLED=true`. This is the final commissioning switch for automatic previews and the
+development-to-production delivery path. Leave it unset while copying or experimenting with this
+example so green CI is not obscured by predictable missing-AWS-configuration failures.
+
 Limit Actions to selected actions and reusable workflows. Every action in this example is pinned to
 a full commit SHA; enforce that through organization policy. Dependabot keeps those pins fresh.
 Grant the default workflow token read-only access. Each workflow declares its narrow write permissions.

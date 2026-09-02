@@ -12,6 +12,7 @@ permissions:
 jobs:
   prepare:
     if: >-
+      vars.DEPLOYMENTS_ENABLED == 'true' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.pull_requests[0].head.repo.full_name == github.repository
@@ -137,12 +138,12 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd0ab0e942779e9f58b1 # v4.3.0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 10.23.0
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "24.15.0"
+          node-version: "24.20.0"
           cache: pnpm
           cache-dependency-path: app/frontend/pnpm-lock.yaml
       - run: pnpm --dir app/frontend install --frozen-lockfile

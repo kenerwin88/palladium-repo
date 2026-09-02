@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24.15.0-bookworm-slim AS frontend
+FROM node:24.20.0-bookworm-slim AS frontend
 WORKDIR /build
 RUN corepack enable
 COPY app/frontend/package.json app/frontend/pnpm-lock.yaml ./
@@ -10,7 +10,7 @@ RUN pnpm build
 
 FROM ghcr.io/astral-sh/uv:0.12.9 AS uv
 
-FROM python:3.13.7-slim-bookworm AS runtime
+FROM python:3.13.15-slim-bookworm AS runtime
 ARG APP_VERSION=dev
 ENV APP_ENV=production \
     APP_VERSION=${APP_VERSION} \
