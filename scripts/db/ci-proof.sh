@@ -12,7 +12,6 @@ mkdir -p "$output_directory"
 output_directory="$(absolute_directory "$output_directory")"
 
 temp_dir="$(mktemp -d)"
-trap 'status=$?; echo "Database rehearsal failed at ci-proof.sh:${LINENO} (exit ${status})." >&2; exit "$status"' ERR
 trap 'rm -rf "$temp_dir"' EXIT
 mkdir -p "${temp_dir}/base-migrations"
 if git -C "$repo_root" cat-file -e "${base_sha}:database/migrations" 2>/dev/null; then

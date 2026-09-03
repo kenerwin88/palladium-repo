@@ -38,6 +38,7 @@ if ! MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" info -
   exit 1
 fi
 jq -e '.migrations | type == "array"' "${temp_dir}/info.json" >/dev/null
+echo "Flyway state captured for ${environment}." >&2
 
 files_json="${temp_dir}/files.json"
 : >"${temp_dir}/files.ndjson"
@@ -48,6 +49,7 @@ while IFS= read -r file; do
     >>"${temp_dir}/files.ndjson"
 done < <(find "$migrations_dir" -maxdepth 1 -type f -name 'V*__*.sql' | LC_ALL=C sort -V)
 jq -s '.' "${temp_dir}/files.ndjson" >"$files_json"
+echo "Migration files hashed for ${environment}." >&2
 
 migration_set_sha256="$("${repo_root}/scripts/db/hash-migrations.sh" "$migrations_dir")"
 connection_fingerprint="$(printf '%s' "$FLYWAY_URL" | sha256_stdin)"
@@ -56,6 +58,7 @@ history_json="$(jq -cS '[.migrations[] |
   select((.state | ascii_downcase) != "pending" and (.state | ascii_downcase) != "outdated") |
   {category, description, installedOnUTC, state, type, version}]' "${temp_dir}/info.json")"
 history_fingerprint="$(printf '%s' "$history_json" | sha256_stdin)"
+echo "Schema history fingerprinted for ${environment}." >&2
 
 jq --argjson files "$(cat "$files_json")" '
   [ .migrations[]
@@ -73,6 +76,7 @@ jq --argjson files "$(cat "$files_json")" '
         version: ($migration.version // "")
       }
   ]' "${temp_dir}/info.json" >"${temp_dir}/pending.json"
+echo "Pending migrations resolved for ${environment}." >&2
 
 flyway_pending_count="$(jq '[.migrations[] | select((.state | ascii_downcase) == "pending" or (.state | ascii_downcase) == "outdated")] | length' "${temp_dir}/info.json")"
 resolved_pending_count="$(jq 'length' "${temp_dir}/pending.json")"
@@ -80,6 +84,7 @@ resolved_pending_count="$(jq 'length' "${temp_dir}/pending.json")"
   echo "could not match every pending Flyway migration to a reviewed SQL file" >&2
   exit 1
 }
+echo "Flyway and reviewed-file counts agree for ${environment}." >&2
 
 jq -n \
   --arg environment "$environment" \
@@ -113,6 +118,7 @@ jq -n \
     migrations: $migrations,
     pending: $pending
   }' >"$json_plan"
+echo "Machine-readable migration plan rendered for ${environment}." >&2
 
 plan_sha256="$(sha256_file "$json_plan")"
 printf '%s  %s\n' "$plan_sha256" "$(basename "$json_plan")" >"${json_plan}.sha256"
