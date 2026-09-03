@@ -25,10 +25,18 @@ generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
 
-MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" validate -outputType=json \
-  >"${temp_dir}/validate.json"
-MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" info -outputType=json \
-  >"${temp_dir}/info.json"
+if ! MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" validate -outputType=json \
+  >"${temp_dir}/validate.json"; then
+  echo "Flyway validation failed:" >&2
+  cat "${temp_dir}/validate.json" >&2
+  exit 1
+fi
+if ! MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" info -outputType=json \
+  >"${temp_dir}/info.json"; then
+  echo "Flyway info failed:" >&2
+  cat "${temp_dir}/info.json" >&2
+  exit 1
+fi
 jq -e '.migrations | type == "array"' "${temp_dir}/info.json" >/dev/null
 
 files_json="${temp_dir}/files.json"

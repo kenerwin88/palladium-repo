@@ -51,10 +51,18 @@ before_fingerprint="$(jq -r '.database.history_fingerprint' "$reviewed_plan")"
 migration_set_sha256="$(jq -r '.migration_set_sha256' "$reviewed_plan")"
 
 export FLYWAY_INSTALLED_BY="${FLYWAY_INSTALLED_BY:-github:${GITHUB_ACTOR:-local}:run-${GITHUB_RUN_ID:-local}-a${GITHUB_RUN_ATTEMPT:-local}}"
-MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" migrate -outputType=json \
-  >"${temp_dir}/migrate.json"
-MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" validate -outputType=json \
-  >"${temp_dir}/validate.json"
+if ! MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" migrate -outputType=json \
+  >"${temp_dir}/migrate.json"; then
+  echo "Flyway migration failed:" >&2
+  cat "${temp_dir}/migrate.json" >&2
+  exit 1
+fi
+if ! MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" validate -outputType=json \
+  >"${temp_dir}/validate.json"; then
+  echo "Flyway validation failed after migration:" >&2
+  cat "${temp_dir}/validate.json" >&2
+  exit 1
+fi
 "${repo_root}/scripts/db/plan.sh" "$environment" "$migrations_dir" \
   "${temp_dir}/after-plan.json" "${temp_dir}/after-plan.md"
 jq -e '.pending | length == 0' "${temp_dir}/after-plan.json" >/dev/null

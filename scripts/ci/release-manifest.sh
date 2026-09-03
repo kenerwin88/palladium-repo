@@ -13,6 +13,12 @@ database_enabled="${DATABASE_ENABLED:-false}"
 database_schema_version="${DATABASE_SCHEMA_VERSION:-}"
 database_plan_sha256="${DATABASE_PLAN_SHA256:-}"
 database_record_sha256="${DATABASE_RECORD_SHA256:-}"
+database_plan_file=""
+database_record_file=""
+if [[ "$database_enabled" == true ]]; then
+  database_plan_file="production-schema-plan.json"
+  database_record_file="schema-deployment.json"
+fi
 released_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}"
 delivery_run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${DELIVERY_RUN_ID}/attempts/${DELIVERY_RUN_ATTEMPT}"
@@ -39,9 +45,9 @@ jq -n \
   --arg database_migrations_file "$(basename "$DATABASE_MIGRATIONS_FILE")" \
   --arg database_migrations_sha256 "$database_migrations_sha256" \
   --arg database_schema_version "$database_schema_version" \
-  --arg database_plan_file "$([[ "$database_enabled" == true ]] && echo production-schema-plan.json || true)" \
+  --arg database_plan_file "$database_plan_file" \
   --arg database_plan_sha256 "$database_plan_sha256" \
-  --arg database_record_file "$([[ "$database_enabled" == true ]] && echo schema-deployment.json || true)" \
+  --arg database_record_file "$database_record_file" \
   --arg database_record_sha256 "$database_record_sha256" \
   --arg development_url "$DEVELOPMENT_URL" \
   --arg staging_url "$STAGING_URL" \
