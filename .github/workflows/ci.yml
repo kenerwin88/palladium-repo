@@ -33,7 +33,7 @@ jobs:
       - run: uv run --project app/backend ruff format --check app/backend
       - run: uv run --project app/backend ruff check app/backend
       - run: uv run --project app/backend mypy app/backend/src
-      - run: uv run --project app/backend pytest
+      - run: uv run --project app/backend pytest -c app/backend/pyproject.toml
 
   frontend:
     name: Frontend
@@ -92,12 +92,86 @@ jobs:
           version: "0.12.9"
           enable-cache: false
       - run: uvx zizmor==1.30.0 .github/workflows
-      - run: find scripts -name '*.sh' -print0 | xargs -0 shellcheck
+      - run: ./scripts/db/validate-migrations.sh database/migrations
+      - run: find scripts -name '*.sh' -print0 | xargs -0 shellcheck && shellcheck scripts/db/test-fixtures/docker
       - run: uvx check-jsonschema==0.38.0 --schemafile docs/release-manifest.schema.json docs/examples/release-manifest.json
+
+  database:
+    name: Database
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+        env:
+          POSTGRES_DB: palladium
+          POSTGRES_PASSWORD: palladium
+          POSTGRES_USER: palladium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U palladium -d palladium"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://palladium:palladium@localhost:5432/palladium
+      FLYWAY_DOCKER_NETWORK: host
+      FLYWAY_PASSWORD: palladium
+      FLYWAY_URL: jdbc:postgresql://localhost:5432/palladium
+      FLYWAY_USER: palladium
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve the schema comparison base
+        id: base
+        env:
+          MERGE_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          base_sha="${PR_BASE_SHA:-${MERGE_BASE_SHA:-${PUSH_BASE_SHA:-}}}"
+          if [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ || "$base_sha" =~ ^0+$ ]]; then
+            base_sha="$GITHUB_SHA"
+          fi
+          echo "sha=${base_sha}" >>"$GITHUB_OUTPUT"
+      - name: Rehearse pending migrations and render the schema plan
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/db/ci-proof.sh "$BASE_SHA" /tmp/schema-proof
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.9"
+          enable-cache: true
+          cache-dependency-glob: app/backend/uv.lock
+      - run: uv sync --project app/backend --frozen --all-groups
+      - name: Prove the application against the migrated schema
+        run: uv run --project app/backend pytest -c app/backend/pyproject.toml
+      - name: Add the migration plan and rehearsed diff to the run summary
+        run: cat /tmp/schema-proof/schema-plan.md >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: schema-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/schema-proof
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: database-migrations-${{ github.run_id }}-${{ github.run_attempt }}
+          path: database
+          if-no-files-found: error
+          retention-days: 14
 
   package:
     name: Immutable artifact
-    needs: [backend, frontend, terraform, workflow-security]
+    needs: [backend, database, frontend, terraform, workflow-security]
     if: >-
       github.event_name == 'push' || github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository

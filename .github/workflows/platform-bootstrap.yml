@@ -42,7 +42,7 @@ jobs:
           account_id="$(aws sts get-caller-identity --query Account --output text)"
           bucket="palladium-${account_id}-${AWS_REGION}-tfstate"
           echo "bucket=${bucket}" >>"$GITHUB_OUTPUT"
-          echo 'environments=["development","staging","production","preview","flcm"]' >>"$GITHUB_OUTPUT"
+          echo 'environments=["development","staging","production","preview","legacy"]' >>"$GITHUB_OUTPUT"
       - name: Initialize or reconnect bootstrap state
         env:
           TF_VAR_aws_region: ${{ inputs.aws_region }}

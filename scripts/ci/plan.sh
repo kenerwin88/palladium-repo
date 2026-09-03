@@ -12,7 +12,7 @@ binary_plan="${4:?usage: plan.sh <environment> <image-uri> <version> <binary-pla
 text_plan="${5:?usage: plan.sh <environment> <image-uri> <version> <binary-plan> <text-plan> [expires-at]}"
 expires_at="${6:-}"
 
-[[ "$environment" =~ ^(development|staging|production|flcm)$ ]] || { echo "invalid environment" >&2; exit 64; }
+[[ "$environment" =~ ^(development|staging|production|legacy)$ ]] || { echo "invalid environment" >&2; exit 64; }
 [[ "$image_uri" =~ @sha256:[0-9a-f]{64}$ ]] || { echo "image URI must be digest-addressed" >&2; exit 64; }
 [[ "$version" =~ ^([0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+|pr-[0-9]+-[0-9a-f]{7})$ ]] || { echo "invalid application version" >&2; exit 64; }
 

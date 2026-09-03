@@ -17,6 +17,14 @@ Name branches `<type>/<issue>-<short-description>` when an issue exists—for ex
 The repository automatically deletes a branch after its squash merge. Do not reuse merged branches;
 start the next change from current `main`.
 
+## Database changes
+
+Add migrations under `database/migrations` and follow the immutable, forward-only rules in
+[schema delivery](docs/schema-delivery.md). Never edit or delete an applied migration. Use
+expand-and-contract changes so the current and immediately previous application remain compatible
+while environments advance. CI must show both the exact pending SQL and a successful disposable
+PostgreSQL rehearsal before merge.
+
 ## Hotfixes and recovery
 
 A hotfix is a small, urgent normal change—not a second delivery system. Branch from `main`, open a

@@ -3,8 +3,8 @@ variable "environment" {
   type        = string
 
   validation {
-    condition     = can(regex("^(development|staging|production|flcm|pr-[0-9]+)$", var.environment))
-    error_message = "Environment must be development, staging, production, flcm, or pr-N."
+    condition     = can(regex("^(development|staging|production|legacy|pr-[0-9]+)$", var.environment))
+    error_message = "Environment must be development, staging, production, legacy, or pr-N."
   }
 }
 

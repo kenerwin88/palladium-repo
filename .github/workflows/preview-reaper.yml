@@ -32,7 +32,11 @@ jobs:
       - name: Destroy previews past their TTL
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
+          DATABASE_DEPLOYMENTS_ENABLED: ${{ vars.DATABASE_DEPLOYMENTS_ENABLED }}
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          FLYWAY_PASSWORD: ${{ secrets.FLYWAY_PASSWORD }}
+          FLYWAY_URL: ${{ secrets.FLYWAY_URL }}
+          FLYWAY_USER: ${{ secrets.FLYWAY_USER }}
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
         run: |
           now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

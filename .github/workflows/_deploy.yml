@@ -62,6 +62,42 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        with:
+          name: database-migrations-${{ inputs.run_id }}-${{ inputs.run_attempt }}
+          path: /tmp/database
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Plan, verify, and migrate the database before the application
+        id: database
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        env:
+          CONFIGURED_SCHEMA: ${{ vars.DATABASE_SCHEMA }}
+          FLYWAY_PASSWORD: ${{ secrets.FLYWAY_PASSWORD }}
+          FLYWAY_URL: ${{ secrets.FLYWAY_URL }}
+          FLYWAY_USER: ${{ secrets.FLYWAY_USER }}
+          RUN_ATTEMPT: ${{ inputs.run_attempt }}
+          RUN_ID: ${{ inputs.run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          : "${FLYWAY_URL:?FLYWAY_URL must be configured on the GitHub Environment}"
+          : "${FLYWAY_USER:?FLYWAY_USER must be configured on the GitHub Environment}"
+          : "${FLYWAY_PASSWORD:?FLYWAY_PASSWORD must be configured on the GitHub Environment}"
+          schema="${CONFIGURED_SCHEMA:-palladium}"
+          if [[ "$TARGET_ENVIRONMENT" =~ ^pr-([0-9]+)$ ]]; then
+            schema="pr_${BASH_REMATCH[1]}"
+          fi
+          [[ "$schema" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "invalid database schema" >&2; exit 64; }
+          export FLYWAY_SCHEMAS="$schema" FLYWAY_DEFAULT_SCHEMA="$schema"
+          mkdir -p /tmp/schema-deployment
+          ./scripts/db/plan.sh "$TARGET_ENVIRONMENT" /tmp/database/migrations \
+            /tmp/schema-deployment/schema-plan.json /tmp/schema-deployment/schema-plan.md
+          cat /tmp/schema-deployment/schema-plan.md >>"$GITHUB_STEP_SUMMARY"
+          ./scripts/db/apply-plan.sh "$TARGET_ENVIRONMENT" /tmp/database/migrations \
+            /tmp/schema-deployment/schema-plan.json /tmp/schema-deployment/schema-deployment.json
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
@@ -85,3 +121,10 @@ jobs:
         run: >-
           ./scripts/ci/deploy.sh "$TARGET_ENVIRONMENT" "$VERSION" "$SOURCE_SHA"
           "$RUN_ID" "$RUN_ATTEMPT" /tmp/deployable/palladium-image.tar "$EXPIRES_AT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.database.outcome == 'success'
+        with:
+          name: schema-deployment-${{ inputs.environment }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/schema-deployment
+          if-no-files-found: error
+          retention-days: 14

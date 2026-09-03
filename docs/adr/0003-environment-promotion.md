@@ -16,5 +16,6 @@ Production preserves separation of duties. Because deployments serialize per env
 release cannot be overtaken by a newer one. A rejected production job leaves the artifact available
 for inspection; the next merge starts a new candidate.
 
-FLCM is not on the automatic path. It pins an operator-selected, already-published release after a
-separate exact plan, protected approval, and change-record entry. It never builds an artifact.
+Legacy pinned environments are not on the automatic path. Each pins an operator-selected,
+already-published release after a separate exact plan, protected approval, and change-record entry.
+They never build an artifact.

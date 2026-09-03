@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-for name in VERSION SOURCE_SHA RUN_ID RUN_ATTEMPT DELIVERY_RUN_ID DELIVERY_RUN_ATTEMPT IMAGE_URI ECR_REPOSITORY SBOM_FILE DEVELOPMENT_URL STAGING_URL PRODUCTION_URL; do
+for name in VERSION SOURCE_SHA RUN_ID RUN_ATTEMPT DELIVERY_RUN_ID DELIVERY_RUN_ATTEMPT IMAGE_URI ECR_REPOSITORY SBOM_FILE DATABASE_MIGRATIONS_FILE DATABASE_MIGRATION_SET_SHA256 DEVELOPMENT_URL STAGING_URL PRODUCTION_URL; do
   [[ -n "${!name:-}" ]] || { echo "${name} must be set" >&2; exit 64; }
 done
 
 output="${1:-release-manifest.json}"
 digest="${IMAGE_URI##*@}"
 sbom_sha256="$(sha256sum "$SBOM_FILE" | cut -d' ' -f1)"
+database_migrations_sha256="$(sha256sum "$DATABASE_MIGRATIONS_FILE" | cut -d' ' -f1)"
+database_enabled="${DATABASE_ENABLED:-false}"
+database_schema_version="${DATABASE_SCHEMA_VERSION:-}"
+database_plan_sha256="${DATABASE_PLAN_SHA256:-}"
+database_record_sha256="${DATABASE_RECORD_SHA256:-}"
 released_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}"
 delivery_run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${DELIVERY_RUN_ID}/attempts/${DELIVERY_RUN_ATTEMPT}"
@@ -29,11 +34,20 @@ jq -n \
   --arg digest "$digest" \
   --arg sbom_file "$(basename "$SBOM_FILE")" \
   --arg sbom_sha256 "$sbom_sha256" \
+  --argjson database_enabled "$database_enabled" \
+  --arg database_migration_set_sha256 "$DATABASE_MIGRATION_SET_SHA256" \
+  --arg database_migrations_file "$(basename "$DATABASE_MIGRATIONS_FILE")" \
+  --arg database_migrations_sha256 "$database_migrations_sha256" \
+  --arg database_schema_version "$database_schema_version" \
+  --arg database_plan_file "$([[ "$database_enabled" == true ]] && echo production-schema-plan.json || true)" \
+  --arg database_plan_sha256 "$database_plan_sha256" \
+  --arg database_record_file "$([[ "$database_enabled" == true ]] && echo schema-deployment.json || true)" \
+  --arg database_record_sha256 "$database_record_sha256" \
   --arg development_url "$DEVELOPMENT_URL" \
   --arg staging_url "$STAGING_URL" \
   --arg production_url "$PRODUCTION_URL" \
   '{
-    schema_version: "1.0",
+    schema_version: "1.1",
     release: {
       version: $version,
       tag: ("v" + $version),
@@ -66,6 +80,18 @@ jq -n \
       file: $sbom_file,
       sha256: $sbom_sha256
     },
+    database: {
+      tool: "Flyway Community",
+      enabled: $database_enabled,
+      migration_set_sha256: $database_migration_set_sha256,
+      migrations_file: $database_migrations_file,
+      migrations_sha256: $database_migrations_sha256,
+      schema_version: $database_schema_version,
+      production_plan_file: $database_plan_file,
+      production_plan_sha256: $database_plan_sha256,
+      deployment_record_file: $database_record_file,
+      deployment_record_sha256: $database_record_sha256
+    },
     infrastructure: {
       source_git_sha: $source_sha,
       roots: ["terraform/bootstrap", "terraform/live"],
@@ -87,7 +113,7 @@ jq -n \
       hotfix_path: "standard-trunk-promotion",
       default_recovery: "roll-forward",
       emergency_restore_scope: "application-alias-only",
-      flcm_eligible: true,
-      flcm_pin: ("release-" + $version)
+      legacy_pinning_eligible: true,
+      legacy_release_pin: ("release-" + $version)
     }
   }' >"$output"

@@ -1,0 +1,202 @@
+name: Pin legacy environment release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released calendar version, without the release- prefix
+        required: true
+        type: string
+      change_record:
+        description: Required audit or change-ticket reference
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-legacy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: plan
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_uri: ${{ steps.release.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: v${{ inputs.version }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.9"
+          enable-cache: false
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Resolve and verify the published release
+        id: release
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          DATABASE_DEPLOYMENTS_ENABLED: ${{ vars.DATABASE_DEPLOYMENTS_ENABLED }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]
+          gh release download "v${VERSION}" \
+            --pattern release-manifest.json \
+            --pattern database-migrations.tar.gz \
+            --dir /tmp --repo "$GITHUB_REPOSITORY"
+          uvx check-jsonschema==0.38.0 --schemafile docs/release-manifest.schema.json \
+            /tmp/release-manifest.json
+          if [[ "$DATABASE_DEPLOYMENTS_ENABLED" == "true" ]]; then
+            jq -e '.database.enabled == true' /tmp/release-manifest.json >/dev/null || {
+              echo "legacy database promotion requires a release proven through production database delivery" >&2
+              exit 1
+            }
+          fi
+          digest="$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=release-${VERSION}" --query 'imageDetails[0].imageDigest' --output text)"
+          manifest_digest="$(jq -r '.artifact.digest' /tmp/release-manifest.json)"
+          [[ "$digest" == "$manifest_digest" ]] || { echo "release manifest and ECR disagree" >&2; exit 1; }
+          expected_migrations_sha="$(jq -r '.database.migrations_sha256' /tmp/release-manifest.json)"
+          actual_migrations_sha="$(sha256sum /tmp/database-migrations.tar.gz | cut -d' ' -f1)"
+          [[ "$actual_migrations_sha" == "$expected_migrations_sha" ]] || {
+            echo "release manifest and migration bundle disagree" >&2
+            exit 1
+          }
+          mkdir -p /tmp/release-database
+          tar -xzf /tmp/database-migrations.tar.gz -C /tmp/release-database
+          migration_set_sha="$(./scripts/db/hash-migrations.sh /tmp/release-database/migrations)"
+          [[ "$migration_set_sha" == "$(jq -r '.database.migration_set_sha256' /tmp/release-manifest.json)" ]] || {
+            echo "migration set does not match the release manifest" >&2
+            exit 1
+          }
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          echo "image_uri=${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${digest}" >>"$GITHUB_OUTPUT"
+      - name: Create the exact legacy-environment plan
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_URI: ${{ steps.release.outputs.image_uri }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/ci/plan.sh legacy "$IMAGE_URI" "$VERSION" /tmp/legacy.tfplan /tmp/legacy.txt
+      - name: Create the legacy-environment database migration plan
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        env:
+          CONFIGURED_SCHEMA: ${{ vars.LEGACY_DATABASE_SCHEMA }}
+          FLYWAY_PASSWORD: ${{ secrets.FLYWAY_LEGACY_PASSWORD }}
+          FLYWAY_URL: ${{ secrets.FLYWAY_LEGACY_URL }}
+          FLYWAY_USER: ${{ secrets.FLYWAY_LEGACY_USER }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          : "${FLYWAY_URL:?The plan Environment needs read-only legacy Flyway credentials}"
+          schema="${CONFIGURED_SCHEMA:-palladium}"
+          [[ "$schema" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "invalid database schema" >&2; exit 64; }
+          export FLYWAY_SCHEMAS="$schema" FLYWAY_DEFAULT_SCHEMA="$schema"
+          ./scripts/db/plan.sh legacy /tmp/release-database/migrations \
+            /tmp/legacy-schema-plan.json /tmp/legacy-schema-plan.md
+      - name: Summarize the change awaiting approval
+        env:
+          CHANGE_RECORD: ${{ inputs.change_record }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          {
+            echo "### Legacy environment plan awaiting approval"
+            echo
+            echo "- Change record: \`${CHANGE_RECORD}\`"
+            echo "- Release: \`${VERSION}\`"
+            echo
+            echo '```hcl'
+            head -c 60000 /tmp/legacy.txt
+            echo
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          if [[ -f /tmp/legacy-schema-plan.md ]]; then
+            cat /tmp/legacy-schema-plan.md >>"$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: legacy-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/legacy.tfplan
+            /tmp/legacy.txt
+            /tmp/release-manifest.json
+            /tmp/database-migrations.tar.gz
+            /tmp/legacy-schema-plan.json
+            /tmp/legacy-schema-plan.json.sha256
+            /tmp/legacy-schema-plan.md
+          if-no-files-found: error
+          retention-days: 7
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: legacy
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: v${{ inputs.version }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: legacy-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/legacy-plan
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+      - name: Apply only the reviewed legacy database migration plan
+        id: database
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        env:
+          CHANGE_RECORD: ${{ inputs.change_record }}
+          CONFIGURED_SCHEMA: ${{ vars.DATABASE_SCHEMA }}
+          FLYWAY_PASSWORD: ${{ secrets.FLYWAY_PASSWORD }}
+          FLYWAY_URL: ${{ secrets.FLYWAY_URL }}
+          FLYWAY_USER: ${{ secrets.FLYWAY_USER }}
+        run: |
+          schema="${CONFIGURED_SCHEMA:-palladium}"
+          [[ "$schema" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "invalid database schema" >&2; exit 64; }
+          export FLYWAY_SCHEMAS="$schema" FLYWAY_DEFAULT_SCHEMA="$schema"
+          mkdir -p /tmp/legacy-database
+          tar -xzf /tmp/legacy-plan/database-migrations.tar.gz -C /tmp/legacy-database
+          ./scripts/db/apply-plan.sh legacy /tmp/legacy-database/migrations \
+            /tmp/legacy-plan/legacy-schema-plan.json /tmp/legacy-schema-deployment.json
+      - name: Apply only the approved legacy-environment plan
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          CHANGE_RECORD: ${{ inputs.change_record }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/ci/apply-environment-plan.sh legacy "$VERSION" /tmp/legacy-plan/legacy.tfplan
+      - name: Preserve the legacy schema deployment evidence
+        if: always() && steps.database.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: legacy-schema-deployment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/legacy-schema-deployment.json
+          if-no-files-found: error
+          retention-days: 90

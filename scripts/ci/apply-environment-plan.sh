@@ -7,7 +7,7 @@ set -Eeuo pipefail
 environment="${1:?usage: apply-environment-plan.sh <environment> <version> <binary-plan>}"
 version="${2:?usage: apply-environment-plan.sh <environment> <version> <binary-plan>}"
 binary_plan="${3:?usage: apply-environment-plan.sh <environment> <version> <binary-plan>}"
-[[ "$environment" == "flcm" ]] || { echo "this entry point is restricted to FLCM" >&2; exit 64; }
+[[ "$environment" == "legacy" ]] || { echo "this entry point is restricted to the legacy environment" >&2; exit 64; }
 binary_plan="$(realpath -m "$binary_plan")"
 
 terraform -chdir=terraform/live init -reconfigure -input=false \
@@ -20,7 +20,7 @@ url="$(terraform -chdir=terraform/live output -raw url)"
 curl --fail --silent --show-error --retry 8 --retry-all-errors "${url}healthz" | jq -e \
   --arg version "$version" '.status == "ok" and .version == $version'
 {
-  echo "### FLCM pinned"
+  echo "### Legacy environment pinned"
   echo
   echo "- Version: \`${version}\`"
   echo "- Applied reviewed plan: \`$(basename "$binary_plan")\`"

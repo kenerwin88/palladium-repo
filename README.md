@@ -1,39 +1,60 @@
 # Palladium delivery reference
 
-An opinionated, production-shaped example of a calm trunk-based delivery system. It combines an
-Angular frontend, a Flask API, Terraform, and GitHub Actions without hiding the hard parts:
-promotion, ephemeral environments, audit pinning, drift, recovery, and first-time trust.
+A complete, opinionated example of trunk-based delivery for an Angular frontend, Flask API,
+PostgreSQL/Flyway schema, and Terraform infrastructure—all orchestrated by GitHub Actions.
 
-## The experience
+The contract is deliberately simple: one permanent branch, one container digest, one migration
+bundle, and one visible promotion path. Pull requests prove changes in isolation; merges flow
+automatically through development and staging; production requires approval of the exact database
+and infrastructure plans that automation will apply.
+
+## Delivery in one minute
 
 ```mermaid
-flowchart LR
+flowchart TD
   A[Short-lived branch] --> B[Pull request]
-  B --> C[Parallel CI]
-  C --> D[Immutable OCI archive]
-  D --> E[Ephemeral PR environment]
-  B -->|squash + merge queue| M[main]
-  M --> F[Build once]
-  F --> G[Development]
-  G -->|smoke test| H[Staging]
-  H -->|smoke test| P[Exact production plan]
-  P --> I{Production approval}
-  I --> J[Apply reviewed plan]
-  J --> K[CalVer release + manifest]
-  K -.->|manual audited pin| L[FLCM]
+  B --> C[CI: app, IaC, workflow, and migration proof]
+  C --> D[Isolated preview URL and pr_N schema]
+  B -->|squash through merge queue| E[main]
+  E --> F[Build one image and migration bundle]
+  F --> G[Development: migrate, deploy, verify]
+  G --> H[Staging: migrate, deploy, verify]
+  H --> I[Exact production database and Terraform plans]
+  I --> J{Protected approval}
+  J --> K[Migrate, apply IaC, deploy same digest, verify]
+  K --> L[CalVer release, manifest, SBOM, and schema evidence]
+  L -.->|operator selects a release| M[Legacy pinned environment: plan, approve, deploy]
 ```
 
-- `main` is the only permanent branch. There are no environment or release branches.
-- Pull requests receive a real, isolated URL after all checks pass. A trusted follow-up workflow
-  performs the deployment, so pull-request code never receives AWS credentials.
-- A merge builds one container. Every environment pulls the same digest from one immutable ECR
-  repository; the artifact is never rebuilt, copied, or retagged per environment.
-- Development and staging are continuous. Production uses a GitHub Environment approval gate.
-- Closing a PR destroys its preview. A seven-day TTL reaper is a second safety net.
-- Every PR shows read-only development, staging, and production Terraform diffs. Production applies
-  the exact reviewed binary plan, not a freshly generated approximation.
-- Weekday refresh-only plans detect drift. Recovery is roll-forward by default; the exceptional
-  rollback workflow changes only the application alias and never changes infrastructure.
+| Stage | Trigger | What happens | Human gate | Durable evidence |
+|---|---|---|---|---|
+| Pull request | Branch update | Test app and IaC, rehearse migrations, publish preview | Code review | Checks, exact SQL, schema diff, Terraform diffs, preview URL |
+| Development | Squash merge to `main` | Migrate first, then deploy and smoke-test the new digest | None | Target schema receipt and deployment artifact |
+| Staging | Development succeeds | Migrate first, deploy the same digest, then run browser acceptance | None | Target schema receipt and Playwright results |
+| Production | Staging succeeds | Generate exact schema and Terraform plans; apply those plans and the same digest | Protected environment approval | CalVer release, manifest, SBOM, plans, checksums, and receipts |
+| Legacy pinned environment | Operator selects a published release | Verify the release and migration bundle, then create target-specific plans | Protected approval plus change record | Workflow URL, reviewed plans, release manifest, and deployment receipt |
+
+A legacy pinned environment is intentionally outside continuous promotion. It stays on its selected,
+already-published release until an operator repeats the audited pinning workflow. It never builds a
+new artifact and cannot silently follow `main`. See the
+[legacy pinning runbook](docs/runbooks/legacy-pinned-environment.md).
+
+Fork pull requests receive the complete unprivileged source and migration rehearsal checks, but no
+cloud preview or state-backed plan because fork code never receives deployment credentials.
+
+The rules that make this predictable are equally short:
+
+- `main` is the only permanent branch; every change, including a hotfix, uses a short-lived PR and
+  squash merge through the queue.
+- Every environment pulls the same digest from one immutable ECR repository. Tags help people find
+  artifacts; deployments use digest identity.
+- Every PR receives an isolated URL and database schema. Closing the PR destroys both, with a
+  seven-day TTL reaper as backup.
+- Every PR shows the three long-lived Terraform diffs and rehearses its Flyway SQL against disposable
+  PostgreSQL built from the merge base.
+- Roll-forward is normal recovery. The exceptional rollback workflow changes only the application
+  alias; it never reverses a database migration or reapplies Terraform.
+- Weekday refresh-only plans detect infrastructure drift.
 
 ## Local development
 
@@ -64,6 +85,8 @@ Useful commands are intentionally few:
 | `make check` | Run the same format, lint, type, test, build, and Terraform checks as CI |
 | `make test` | Run both unit-test suites |
 | `make build` | Build the production Lambda-compatible container locally |
+| `make db-plan` | Write `.cache/schema-plan.{json,md}` and print exact pending SQL and hashes |
+| `make db-reset` | Rebuild the disposable local database from every migration |
 | `make clean` | Stop the stack and remove its named dependency volumes |
 
 The complete evidence ladder and the question each check answers are documented in
@@ -75,6 +98,7 @@ The complete evidence ladder and the question each check answers are documented 
 app/
   backend/                 Flask factory, API, and pytest suite
   frontend/                Standalone Angular application and Vitest suite
+database/migrations/       Immutable forward-only Flyway SQL
 terraform/
   bootstrap/               Shared state, one ECR repository, and GitHub OIDC trust
   live/                    Thin environment root and non-secret sizing policy
@@ -83,7 +107,7 @@ terraform/
   ci.yml                   Parallel proof and build-once artifact
   preview*.yml             Trusted preview deployment, cleanup, and TTL reaper
   delivery.yml             Development -> staging -> approved production
-  flcm-promote.yml         Audited manual release pin for FLCM
+  legacy-promote.yml       Audited release pin for a legacy environment
   rollback.yml             Exceptional app-only alias restore
   drift.yml                Scheduled refresh-only plans
   platform-bootstrap.yml   One-time account trust bootstrap
@@ -96,7 +120,7 @@ preview—one cheap, scale-to-zero unit. Lambda Web Adapter preserves a normal W
 model. For sustained high-throughput or long-running requests, keep the delivery contract and swap
 only the Terraform service module for ECS or another container runtime.
 
-## Environment policy
+## Environment controls
 
 The example intentionally uses one AWS deployment account and exactly one ECR repository. Isolation
 comes from separate Terraform state keys, named resources, serialized jobs, and protected GitHub
@@ -110,15 +134,17 @@ silently produce a different environment artifact.
 | `development` | Every successful `main` CI run | No approval |
 | `staging` | Development smoke test succeeds | No approval |
 | `production` | Exact plan exists after staging | Required reviewers; no self-review |
-| `flcm` | Operator selects a published release | Required reviewers + change record |
+| `legacy` | Operator selects a published release | Required reviewers + change record |
 
 Each environment defines non-secret variables `AWS_ROLE_ARN`, `AWS_REGION`, `ECR_REPOSITORY`, and
 `TF_STATE_BUCKET`. See [repository setup](docs/repository-setup.md) for the exact controls.
 
-Published releases include a schema-validated [release manifest](docs/release-manifest.md) and
-CycloneDX SBOM. Artifact names and ECR lifecycle behavior are fixed by
-[ADR 0004](docs/adr/0004-artifact-naming-and-retention.md); hotfix, recovery, and FLCM behavior are
-fixed by [ADR 0005](docs/adr/0005-hotfix-recovery-and-flcm.md).
+Published releases include a schema-validated [release manifest](docs/release-manifest.md), the exact
+database migration bundle, and a CycloneDX SBOM. The Flyway review/apply contract is documented in
+[schema delivery](docs/schema-delivery.md) and [ADR 0006](docs/adr/0006-forward-only-database-migrations.md).
+Artifact names and ECR lifecycle behavior are fixed by
+[ADR 0004](docs/adr/0004-artifact-naming-and-retention.md); hotfix, recovery, and legacy pinning are
+fixed by [ADR 0005](docs/adr/0005-hotfix-recovery-and-legacy-pinning.md).
 
 ## Versioning decision
 
@@ -136,18 +162,25 @@ on CalVer. Full reasoning is in [ADR 0002](docs/adr/0002-calendar-versioning.md)
 
 ## First-time setup
 
+Deployment setup requires repository-administrator access, an AWS account with bootstrap permission,
+and PostgreSQL endpoints reachable from the selected GitHub runners. Local development requires only
+Docker; the optional native loop uses `mise`.
+
 1. Create a temporary `bootstrap` GitHub Environment. Add short-lived `AWS_ACCESS_KEY_ID`,
    `AWS_SECRET_ACCESS_KEY`, and, when applicable, `AWS_SESSION_TOKEN` secrets.
 2. Run **Platform bootstrap** once. It creates the versioned Terraform state bucket, the single
    immutable ECR repository, environment-scoped deployment roles, and a read-only plan OIDC role.
-3. Create `preview`, `plan`, `development`, `staging`, `production`, and `flcm`; copy the values shown
+3. Create `preview`, `plan`, `development`, `staging`, `production`, and `legacy`; copy the values shown
    in the summary. `plan` receives the plan role ARN, while every deploy environment receives the
    deploy role ARN. Delete the bootstrap credentials immediately.
-4. Set the repository variable `DEPLOYMENTS_ENABLED=true`. Until this explicit final switch,
-   successful CI runs do not attempt preview or persistent-environment deployment.
-5. Configure the rules in [repository setup](docs/repository-setup.md), especially the merge queue and
-   production reviewers.
-6. Open a small pull request. Its preview is the acceptance test for the platform itself.
+4. Configure the rules in [repository setup](docs/repository-setup.md), especially required checks,
+   automatic branch deletion, the squash-only merge queue, and protected reviewers.
+5. Configure environment-scoped PostgreSQL migration credentials and verify runner connectivity as
+   described in [repository setup](docs/repository-setup.md).
+6. Set `DATABASE_DEPLOYMENTS_ENABLED=true`. This enables persistent and preview schema delivery.
+7. Set `DEPLOYMENTS_ENABLED=true` as the final commissioning switch. Until then, successful CI runs
+   prove the repository without attempting cloud deployments.
+8. Open a small pull request. Its preview is the acceptance test for the platform itself.
 
 After bootstrap, no developer or workflow needs a long-lived AWS key and no deployment is performed
 outside GitHub Actions.

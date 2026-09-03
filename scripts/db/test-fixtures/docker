@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+: "${FAKE_FLYWAY_STATE:?FAKE_FLYWAY_STATE must identify the isolated test state}"
+
+operation=""
+for argument in "$@"; do
+  case "$argument" in
+    info | migrate | validate) operation="$argument" ;;
+  esac
+done
+
+case "$operation" in
+  validate)
+    echo '{"errorDetails":null,"invalidMigrations":[],"validationSuccessful":true,"validateCount":1,"flywayVersion":"13.4.0","database":"testdb","warnings":[],"operation":"validate"}'
+    ;;
+  info)
+    if [[ -f "$FAKE_FLYWAY_STATE" ]]; then
+      state="Success"
+      schema_version="001"
+      installed_on="2026-09-02T12:00:00Z"
+    else
+      state="Pending"
+      schema_version=""
+      installed_on=""
+    fi
+    jq -n \
+      --arg installed_on "$installed_on" \
+      --arg schema_version "$schema_version" \
+      --arg state "$state" \
+      '{
+        schemaVersion: (if $schema_version == "" then null else $schema_version end),
+        schemaName: "public",
+        migrations: [{
+          category: "Versioned",
+          version: "001",
+          description: "create application message",
+          type: "SQL",
+          installedOnUTC: $installed_on,
+          state: $state,
+          filepath: "/flyway/sql/V001__create_application_message.sql"
+        }],
+        flywayVersion: "13.4.0",
+        database: "testdb",
+        warnings: [],
+        operation: "info"
+      }'
+    ;;
+  migrate)
+    touch "$FAKE_FLYWAY_STATE"
+    echo '{"migrationsExecuted":1,"success":true,"flywayVersion":"13.4.0","database":"testdb","operation":"migrate"}'
+    ;;
+  *)
+    echo "fake Docker received no supported Flyway operation" >&2
+    exit 64
+    ;;
+esac

@@ -105,6 +105,14 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        with:
+          name: database-migrations-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: /tmp/database
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
@@ -123,6 +131,23 @@ jobs:
         run: >-
           ./scripts/ci/plan.sh production "$IMAGE_URI" "$VERSION"
           /tmp/production.tfplan /tmp/production.txt
+      - name: Create the production database migration plan
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        env:
+          CONFIGURED_SCHEMA: ${{ vars.DATABASE_SCHEMA }}
+          FLYWAY_PASSWORD: ${{ secrets.FLYWAY_PRODUCTION_PASSWORD }}
+          FLYWAY_URL: ${{ secrets.FLYWAY_PRODUCTION_URL }}
+          FLYWAY_USER: ${{ secrets.FLYWAY_PRODUCTION_USER }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          : "${FLYWAY_URL:?The plan Environment needs read-only production FLYWAY_URL credentials}"
+          schema="${CONFIGURED_SCHEMA:-palladium}"
+          [[ "$schema" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "invalid database schema" >&2; exit 64; }
+          export FLYWAY_SCHEMAS="$schema" FLYWAY_DEFAULT_SCHEMA="$schema"
+          ./scripts/db/plan.sh production /tmp/database/migrations \
+            /tmp/production-schema-plan.json /tmp/production-schema-plan.md
       - name: Put the production diff in the run summary
         run: |
           {
@@ -138,12 +163,18 @@ jobs:
             echo '```'
             echo '</details>'
           } >>"$GITHUB_STEP_SUMMARY"
+          if [[ -f /tmp/production-schema-plan.md ]]; then
+            cat /tmp/production-schema-plan.md >>"$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: production-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             /tmp/production.tfplan
             /tmp/production.txt
+            /tmp/production-schema-plan.json
+            /tmp/production-schema-plan.json.sha256
+            /tmp/production-schema-plan.md
           if-no-files-found: error
           retention-days: 7
 
@@ -161,6 +192,10 @@ jobs:
     outputs:
       url: ${{ steps.apply.outputs.url }}
       image_uri: ${{ needs.staging.outputs.image_uri }}
+      database_migration_set_sha256: ${{ steps.database.outputs.migration_set_sha256 }}
+      database_plan_sha256: ${{ steps.database.outputs.plan_sha256 }}
+      database_record_sha256: ${{ steps.database.outputs.record_sha256 }}
+      database_schema_version: ${{ steps.database.outputs.schema_version }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -170,6 +205,14 @@ jobs:
         with:
           name: production-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/production-plan
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        with:
+          name: database-migrations-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: /tmp/database
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
@@ -178,6 +221,23 @@ jobs:
         with:
           terraform_version: 1.14.8
           terraform_wrapper: false
+      - name: Apply only the reviewed database migration plan
+        id: database
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        env:
+          CONFIGURED_SCHEMA: ${{ vars.DATABASE_SCHEMA }}
+          FLYWAY_PASSWORD: ${{ secrets.FLYWAY_PASSWORD }}
+          FLYWAY_URL: ${{ secrets.FLYWAY_URL }}
+          FLYWAY_USER: ${{ secrets.FLYWAY_USER }}
+        run: |
+          : "${FLYWAY_URL:?FLYWAY_URL must be configured on production}"
+          schema="${CONFIGURED_SCHEMA:-palladium}"
+          [[ "$schema" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "invalid database schema" >&2; exit 64; }
+          export FLYWAY_SCHEMAS="$schema" FLYWAY_DEFAULT_SCHEMA="$schema"
+          mkdir -p /tmp/production-schema-result
+          ./scripts/db/apply-plan.sh production /tmp/database/migrations \
+            /tmp/production-plan/production-schema-plan.json \
+            /tmp/production-schema-result/schema-deployment.json
       - name: Apply only the reviewed plan and verify production
         id: apply
         env:
@@ -190,6 +250,13 @@ jobs:
           ./scripts/ci/apply-plan.sh production "$VERSION"
           "${{ github.event.workflow_run.id }}" "${{ github.event.workflow_run.run_attempt }}"
           "$IMAGE_URI" /tmp/production-plan/production.tfplan
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.database.outcome == 'success'
+        with:
+          name: production-schema-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/production-schema-result
+          if-no-files-found: error
+          retention-days: 14
 
   release:
     needs: [prepare, development, staging, production]
@@ -209,8 +276,44 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: database-migrations-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: /tmp/database
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        with:
+          name: production-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/release-production-plan
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: vars.DATABASE_DEPLOYMENTS_ENABLED == 'true'
+        with:
+          name: production-schema-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/release-schema-result
+      - name: Create the immutable database migration bundle
+        run: |
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            --gzip --create --file=/tmp/database-migrations.tar.gz \
+            --directory=/tmp/database migrations
+          if [[ -f /tmp/release-production-plan/production-schema-plan.json ]]; then
+            cp /tmp/release-production-plan/production-schema-plan.json /tmp/production-schema-plan.json
+            cp /tmp/release-schema-result/schema-deployment.json /tmp/schema-deployment.json
+          fi
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.9"
+          enable-cache: false
       - name: Generate the audit release manifest
         env:
+          DATABASE_ENABLED: ${{ vars.DATABASE_DEPLOYMENTS_ENABLED == 'true' && 'true' || 'false' }}
+          DATABASE_MIGRATIONS_FILE: /tmp/database-migrations.tar.gz
+          DATABASE_MIGRATION_SET_SHA256: ${{ needs.production.outputs.database_migration_set_sha256 || '' }}
+          DATABASE_PLAN_SHA256: ${{ needs.production.outputs.database_plan_sha256 || '' }}
+          DATABASE_RECORD_SHA256: ${{ needs.production.outputs.database_record_sha256 || '' }}
+          DATABASE_SCHEMA_VERSION: ${{ needs.production.outputs.database_schema_version || '' }}
           DEVELOPMENT_URL: ${{ needs.development.outputs.url }}
           DELIVERY_RUN_ATTEMPT: ${{ github.run_attempt }}
           DELIVERY_RUN_ID: ${{ github.run_id }}
@@ -225,7 +328,12 @@ jobs:
         run: |
           repository_path="${IMAGE_URI%%@*}"
           export ECR_REPOSITORY="${repository_path##*/}"
+          if [[ -z "$DATABASE_MIGRATION_SET_SHA256" ]]; then
+            export DATABASE_MIGRATION_SET_SHA256="$(./scripts/db/hash-migrations.sh /tmp/database/migrations)"
+          fi
           ./scripts/ci/release-manifest.sh /tmp/release-manifest.json
+          uvx check-jsonschema==0.38.0 --schemafile docs/release-manifest.schema.json \
+            /tmp/release-manifest.json
       - name: Publish calendar-versioned GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -244,7 +352,13 @@ jobs:
               /tmp/existing-release/release-manifest.json >/dev/null
             gh release upload "v${VERSION}" "$unique_manifest" --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "v${VERSION}" /tmp/release-manifest.json \
-              /tmp/deployable/palladium-sbom.cdx.json \
+            assets=(
+              /tmp/release-manifest.json
+              /tmp/deployable/palladium-sbom.cdx.json
+              /tmp/database-migrations.tar.gz
+            )
+            [[ -f /tmp/production-schema-plan.json ]] && assets+=(/tmp/production-schema-plan.json)
+            [[ -f /tmp/schema-deployment.json ]] && assets+=(/tmp/schema-deployment.json)
+            gh release create "v${VERSION}" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" --target "$SHA" --generate-notes --title "$VERSION"
           fi

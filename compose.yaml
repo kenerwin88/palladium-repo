@@ -1,6 +1,42 @@
 name: palladium
 
 services:
+  database:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-palladium}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-palladium}
+      POSTGRES_USER: ${POSTGRES_USER:-palladium}
+    ports:
+      - "5432:5432"
+    volumes:
+      - database-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  flyway:
+    image: flyway/flyway:13.4.0@sha256:e19dbd5c73a1487d825ffe02f9e11e0ce3f37b80bbc012ece1cba15af4f9f9ce
+    command: migrate
+    environment:
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_CONNECT_RETRIES: "20"
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_OUT_OF_ORDER: "false"
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-palladium}
+      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
+      FLYWAY_URL: jdbc:postgresql://database:5432/${POSTGRES_DB:-palladium}
+      FLYWAY_USER: ${POSTGRES_USER:-palladium}
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+      FLYWAY_VALIDATE_ON_MIGRATE: "true"
+    volumes:
+      - ./database/migrations:/flyway/sql:ro
+    depends_on:
+      database:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -8,6 +44,8 @@ services:
     environment:
       APP_ENV: local
       APP_VERSION: dev
+      DATABASE_SCHEMA: public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-palladium}:${POSTGRES_PASSWORD:-palladium}@database:5432/${POSTGRES_DB:-palladium}
       FLASK_DEBUG: "1"
     ports:
       - "5000:5000"
@@ -19,6 +57,9 @@ services:
       interval: 5s
       timeout: 2s
       retries: 10
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
 
   frontend:
     image: node:24.20.0-bookworm-slim
@@ -39,4 +80,5 @@ services:
 
 volumes:
   backend-venv:
+  database-data:
   frontend-node-modules:

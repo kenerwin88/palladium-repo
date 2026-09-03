@@ -20,7 +20,10 @@
         <div>
           <span class="status-label">LIVE SYSTEM</span>
           <strong>{{ current.message }}</strong>
-          <span class="metadata">{{ current.environment }} · {{ current.version }}</span>
+          <span class="metadata">
+            {{ current.environment }} · {{ current.version }} · schema
+            {{ current.database_schema_version }}
+          </span>
         </div>
       } @else if (error()) {
         <div class="pulse error" aria-hidden="true"></div>
@@ -72,5 +75,5 @@
 
 <footer>
   <span>Designed for continuous delivery</span>
-  <span>Angular + Flask + Terraform + GitHub Actions</span>
+  <span>Angular + Flask + Flyway + PostgreSQL + Terraform + GitHub Actions</span>
 </footer>

@@ -2,6 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Component, OnInit, inject, signal } from '@angular/core';
 
 interface Greeting {
+  database_schema_version: string;
   environment: string;
   generated_at: string;
   message: string;

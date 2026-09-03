@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from flask import Blueprint, jsonify
 from flask.typing import ResponseReturnValue
 
+from palladium.database import read_status
+
 api = Blueprint("api", __name__)
 
 
@@ -26,9 +28,11 @@ def health() -> ResponseReturnValue:
 @api.get("/api/greeting")
 def greeting() -> ResponseReturnValue:
     """Return a tiny example payload for the Angular UI."""
+    database = read_status()
     return (
         jsonify(
-            message="Your trunk is healthy and ready to ship.",
+            database_schema_version=database.schema_version,
+            message=database.message,
             generated_at=datetime.now(UTC).isoformat(),
             **runtime_metadata(),
         ),

@@ -1,4 +1,4 @@
-# ADR 0005: One change path, roll-forward recovery, and FLCM pinning
+# ADR 0005: One change path, roll-forward recovery, and legacy pinning
 
 Status: accepted
 
@@ -12,7 +12,8 @@ Roll-forward is the default recovery strategy. The exceptional **Rollback** work
 application incidents only: it switches the Lambda alias to a previously published function version
 after protected approval. It never applies Terraform or claims to reverse stateful side effects.
 
-FLCM is a protected, manually pinned audit environment. An operator supplies a published CalVer and
-change record. Automation verifies its release manifest against `release-<CalVer>` in the same ECR,
-plans against FLCM state, records the diff, and applies that exact plan after approval. FLCM never
-follows `main` automatically and never rebuilds or copies an image.
+A legacy pinned environment is a protected, manually managed audit target. An operator supplies a
+published CalVer and change record. Automation verifies its release manifest against
+`release-<CalVer>` in the same ECR, plans against that environment's state, records the diff, and
+applies that exact plan after approval. It never follows `main` automatically and never rebuilds or
+copies an image.

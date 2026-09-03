@@ -32,7 +32,11 @@ jobs:
       - name: Destroy isolated preview
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
+          DATABASE_DEPLOYMENTS_ENABLED: ${{ vars.DATABASE_DEPLOYMENTS_ENABLED }}
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          FLYWAY_PASSWORD: ${{ secrets.FLYWAY_PASSWORD }}
+          FLYWAY_URL: ${{ secrets.FLYWAY_URL }}
+          FLYWAY_USER: ${{ secrets.FLYWAY_USER }}
           PREVIEW_NUMBER: ${{ github.event.pull_request.number }}
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
         run: ./scripts/ci/destroy.sh "pr-${PREVIEW_NUMBER}"

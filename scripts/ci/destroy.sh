@@ -23,3 +23,8 @@ terraform -chdir=terraform/live destroy -auto-approve -input=false \
   -var="project=${ECR_REPOSITORY}" \
   -var="repository=${GITHUB_REPOSITORY}" \
   -var="application_version=destroyed"
+
+if [[ "${DATABASE_DEPLOYMENTS_ENABLED:-false}" == "true" ]]; then
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+  "${repo_root}/scripts/db/destroy-preview-schema.sh" "$environment"
+fi
