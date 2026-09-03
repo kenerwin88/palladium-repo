@@ -16,7 +16,7 @@ reviewed_plan="$(absolute_path "$reviewed_plan")"
 mkdir -p "$(dirname "$deployment_record")"
 deployment_record="$(absolute_path "$deployment_record")"
 
-jq -e --arg environment "$environment" '
+if ! jq -e --arg environment "$environment" '
   .schema_plan_version == "1.0" and
   .environment == $environment and
   (.source.git_sha | test("^[0-9a-f]{40}$")) and
@@ -26,7 +26,12 @@ jq -e --arg environment "$environment" '
   (.database.history_fingerprint | test("^[0-9a-f]{64}$")) and
   (.migration_set_sha256 | test("^[0-9a-f]{64}$")) and
   (.pending | type == "array")
-' "$reviewed_plan" >/dev/null
+' "$reviewed_plan" >/dev/null; then
+  echo "reviewed database plan does not satisfy the schema contract:" >&2
+  jq '{schema_plan_version, environment, source, database, migration_set_sha256, pending}' \
+    "$reviewed_plan" >&2
+  exit 1
+fi
 
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
