@@ -21,6 +21,7 @@ source_sha="${SOURCE_SHA:-$(git -C "$repo_root" rev-parse HEAD)}"
 run_id="${RUN_ID:-local}"
 run_attempt="${RUN_ATTEMPT:-local}"
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+database_schema="${FLYWAY_DEFAULT_SCHEMA:-}"
 
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
@@ -38,6 +39,10 @@ if ! MIGRATIONS_DIR="$migrations_dir" "${repo_root}/scripts/db/flyway.sh" info -
   exit 1
 fi
 jq -e '.migrations | type == "array"' "${temp_dir}/info.json" >/dev/null
+if [[ -z "$database_schema" ]]; then
+  database_schema="$(jq -r '.schemaName // empty' "${temp_dir}/info.json")"
+fi
+database_schema="${database_schema:-public}"
 echo "Flyway state captured for ${environment}." >&2
 
 files_json="${temp_dir}/files.json"
@@ -94,7 +99,7 @@ jq -n \
   --arg generated_at "$generated_at" \
   --arg flyway_image "${FLYWAY_IMAGE:-$FLYWAY_IMAGE_DEFAULT}" \
   --arg database_name "$(jq -r '.database // "unknown"' "${temp_dir}/info.json")" \
-  --arg database_schema "$(jq -r '.schemaName // "unknown"' "${temp_dir}/info.json")" \
+  --arg database_schema "$database_schema" \
   --arg current_version "$(jq -r '.schemaVersion // "empty"' "${temp_dir}/info.json")" \
   --arg connection_fingerprint "$connection_fingerprint" \
   --arg history_fingerprint "$history_fingerprint" \
