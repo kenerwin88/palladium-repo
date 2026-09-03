@@ -12,6 +12,7 @@ mkdir -p "$output_directory"
 output_directory="$(absolute_directory "$output_directory")"
 
 temp_dir="$(mktemp -d)"
+trap 'status=$?; echo "Database rehearsal failed at ci-proof.sh:${LINENO} (exit ${status})." >&2; exit "$status"' ERR
 trap 'rm -rf "$temp_dir"' EXIT
 mkdir -p "${temp_dir}/base-migrations"
 if git -C "$repo_root" cat-file -e "${base_sha}:database/migrations" 2>/dev/null; then
@@ -21,14 +22,19 @@ if git -C "$repo_root" cat-file -e "${base_sha}:database/migrations" 2>/dev/null
 fi
 
 if find "${temp_dir}/base-migrations" -maxdepth 1 -type f -name 'V*__*.sql' | grep -q .; then
+  echo "Rebuilding the merge-base schema..." >&2
   MIGRATIONS_DIR="${temp_dir}/base-migrations" "${repo_root}/scripts/db/flyway.sh" migrate
 fi
 
+echo "Capturing the merge-base schema..." >&2
 "${repo_root}/scripts/db/dump-schema.sh" "${temp_dir}/before.sql"
+echo "Generating the proposed migration plan..." >&2
 "${repo_root}/scripts/db/plan.sh" pull-request "${repo_root}/database/migrations" \
   "${output_directory}/schema-plan.json" "${output_directory}/schema-plan.md"
+echo "Applying the reviewed plan to disposable PostgreSQL..." >&2
 "${repo_root}/scripts/db/apply-plan.sh" pull-request "${repo_root}/database/migrations" \
   "${output_directory}/schema-plan.json" "${output_directory}/schema-deployment.json"
+echo "Capturing and comparing the proposed schema..." >&2
 "${repo_root}/scripts/db/dump-schema.sh" "${temp_dir}/after.sql"
 
 diff -u --label merge-base-schema.sql --label proposed-schema.sql \
@@ -61,3 +67,5 @@ jq -n \
     deployment_record_sha256: $deployment_record_sha256,
     schema_diff_sha256: $schema_diff_sha256
   }' >"${output_directory}/schema-rehearsal.json"
+
+echo "Database rehearsal proof is complete." >&2
