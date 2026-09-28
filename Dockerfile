@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 COPY app/frontend/ ./
 RUN pnpm build
 
-FROM ghcr.io/astral-sh/uv:0.12.9 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.19 AS uv
 
 FROM python:3.13.15-slim-bookworm AS runtime
 ARG APP_VERSION=dev
