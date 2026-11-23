@@ -25,21 +25,21 @@ jobs:
       packages: read
       security-events: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@a35ac6e6798d72df5475948b28efb89edc2e19ca # v4.37.9
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@a35ac6e6798d72df5475948b28efb89edc2e19ca # v4.37.9
-      - uses: github/codeql-action/analyze@a35ac6e6798d72df5475948b28efb89edc2e19ca # v4.37.9
+      - uses: github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           category: /language:${{ matrix.language }}
           output: codeql-results
           upload: ${{ (github.event.repository.private == false || vars.GHAS_ENABLED == 'true') && 'always' || 'never' }}
           upload-database: false
       - name: Preserve analysis results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: codeql-${{ matrix.language }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: codeql-results
